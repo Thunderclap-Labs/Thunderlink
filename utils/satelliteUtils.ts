@@ -165,12 +165,54 @@ export function getSatelliteInfo(satData: SatelliteData, date: Date = new Date()
  * Ground stations around the world
  */
 export const GROUND_STATIONS = [
-  { id: 'gs-1', name: 'North America Hub', location: { lat: 37.7749, lon: -122.4194, city: 'San Francisco', country: 'USA' }, status: 'online' as const, capacity: 50, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
-  { id: 'gs-2', name: 'Europe Hub', location: { lat: 51.5074, lon: -0.1278, city: 'London', country: 'UK' }, status: 'online' as const, capacity: 45, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
-  { id: 'gs-3', name: 'Asia Pacific Hub', location: { lat: 35.6762, lon: 139.6503, city: 'Tokyo', country: 'Japan' }, status: 'online' as const, capacity: 40, antennaType: 'Parabolic 15m', frequency: 'Ku-band' },
-  { id: 'gs-4', name: 'South America Hub', location: { lat: -23.5505, lon: -46.6333, city: 'São Paulo', country: 'Brazil' }, status: 'online' as const, capacity: 35, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
-  { id: 'gs-5', name: 'Africa Hub', location: { lat: -33.9249, lon: 18.4241, city: 'Cape Town', country: 'South Africa' }, status: 'online' as const, capacity: 30, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
-  { id: 'gs-6', name: 'Middle East Hub', location: { lat: 25.2048, lon: 55.2708, city: 'Dubai', country: 'UAE' }, status: 'online' as const, capacity: 40, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  // North America
+  { id: 'gs-1', name: 'San Francisco Hub', location: { lat: 37.7749, lon: -122.4194, city: 'San Francisco', country: 'USA' }, status: 'online' as const, capacity: 50, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  { id: 'gs-2', name: 'New York Station', location: { lat: 40.7128, lon: -74.0060, city: 'New York', country: 'USA' }, status: 'online' as const, capacity: 45, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-3', name: 'Miami Gateway', location: { lat: 25.7617, lon: -80.1918, city: 'Miami', country: 'USA' }, status: 'online' as const, capacity: 40, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  { id: 'gs-4', name: 'Seattle Uplink', location: { lat: 47.6062, lon: -122.3321, city: 'Seattle', country: 'USA' }, status: 'online' as const, capacity: 38, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  { id: 'gs-5', name: 'Toronto Gateway', location: { lat: 43.6532, lon: -79.3832, city: 'Toronto', country: 'Canada' }, status: 'online' as const, capacity: 42, antennaType: 'Parabolic 15m', frequency: 'Ku-band' },
+  { id: 'gs-6', name: 'Mexico City Hub', location: { lat: 19.4326, lon: -99.1332, city: 'Mexico City', country: 'Mexico' }, status: 'online' as const, capacity: 35, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  
+  // South America
+  { id: 'gs-7', name: 'São Paulo Hub', location: { lat: -23.5505, lon: -46.6333, city: 'São Paulo', country: 'Brazil' }, status: 'online' as const, capacity: 35, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  { id: 'gs-8', name: 'Buenos Aires Station', location: { lat: -34.6037, lon: -58.3816, city: 'Buenos Aires', country: 'Argentina' }, status: 'online' as const, capacity: 32, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-9', name: 'Lima Gateway', location: { lat: -12.0464, lon: -77.0428, city: 'Lima', country: 'Peru' }, status: 'online' as const, capacity: 30, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  { id: 'gs-10', name: 'Santiago Station', location: { lat: -33.4489, lon: -70.6693, city: 'Santiago', country: 'Chile' }, status: 'online' as const, capacity: 33, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  
+  // Europe
+  { id: 'gs-11', name: 'London Hub', location: { lat: 51.5074, lon: -0.1278, city: 'London', country: 'UK' }, status: 'online' as const, capacity: 45, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  { id: 'gs-12', name: 'Paris Gateway', location: { lat: 48.8566, lon: 2.3522, city: 'Paris', country: 'France' }, status: 'online' as const, capacity: 43, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  { id: 'gs-13', name: 'Berlin Station', location: { lat: 52.5200, lon: 13.4050, city: 'Berlin', country: 'Germany' }, status: 'online' as const, capacity: 44, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-14', name: 'Madrid Hub', location: { lat: 40.4168, lon: -3.7038, city: 'Madrid', country: 'Spain' }, status: 'online' as const, capacity: 40, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  { id: 'gs-15', name: 'Rome Gateway', location: { lat: 41.9028, lon: 12.4964, city: 'Rome', country: 'Italy' }, status: 'online' as const, capacity: 38, antennaType: 'Parabolic 10m', frequency: 'Ku-band' },
+  { id: 'gs-16', name: 'Stockholm Station', location: { lat: 59.3293, lon: 18.0686, city: 'Stockholm', country: 'Sweden' }, status: 'online' as const, capacity: 36, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  { id: 'gs-17', name: 'Moscow Hub', location: { lat: 55.7558, lon: 37.6173, city: 'Moscow', country: 'Russia' }, status: 'online' as const, capacity: 42, antennaType: 'Parabolic 15m', frequency: 'Ku-band' },
+  
+  // Asia
+  { id: 'gs-18', name: 'Tokyo Hub', location: { lat: 35.6762, lon: 139.6503, city: 'Tokyo', country: 'Japan' }, status: 'online' as const, capacity: 50, antennaType: 'Parabolic 15m', frequency: 'Ku-band' },
+  { id: 'gs-19', name: 'Singapore Gateway', location: { lat: 1.3521, lon: 103.8198, city: 'Singapore', country: 'Singapore' }, status: 'online' as const, capacity: 48, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  { id: 'gs-20', name: 'Seoul Station', location: { lat: 37.5665, lon: 126.9780, city: 'Seoul', country: 'South Korea' }, status: 'online' as const, capacity: 46, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-21', name: 'Hong Kong Hub', location: { lat: 22.3193, lon: 114.1694, city: 'Hong Kong', country: 'China' }, status: 'online' as const, capacity: 44, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  { id: 'gs-22', name: 'Mumbai Gateway', location: { lat: 19.0760, lon: 72.8777, city: 'Mumbai', country: 'India' }, status: 'online' as const, capacity: 42, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-23', name: 'Bangkok Station', location: { lat: 13.7563, lon: 100.5018, city: 'Bangkok', country: 'Thailand' }, status: 'online' as const, capacity: 38, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  { id: 'gs-24', name: 'Sydney Hub', location: { lat: -33.8688, lon: 151.2093, city: 'Sydney', country: 'Australia' }, status: 'online' as const, capacity: 45, antennaType: 'Parabolic 15m', frequency: 'Ku-band' },
+  { id: 'gs-25', name: 'Beijing Gateway', location: { lat: 39.9042, lon: 116.4074, city: 'Beijing', country: 'China' }, status: 'online' as const, capacity: 47, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  
+  // Middle East
+  { id: 'gs-26', name: 'Dubai Hub', location: { lat: 25.2048, lon: 55.2708, city: 'Dubai', country: 'UAE' }, status: 'online' as const, capacity: 48, antennaType: 'Parabolic 15m', frequency: 'Ka-band' },
+  { id: 'gs-27', name: 'Tel Aviv Station', location: { lat: 32.0853, lon: 34.7818, city: 'Tel Aviv', country: 'Israel' }, status: 'online' as const, capacity: 40, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-28', name: 'Riyadh Gateway', location: { lat: 24.7136, lon: 46.6753, city: 'Riyadh', country: 'Saudi Arabia' }, status: 'online' as const, capacity: 42, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  { id: 'gs-29', name: 'Istanbul Hub', location: { lat: 41.0082, lon: 28.9784, city: 'Istanbul', country: 'Turkey' }, status: 'online' as const, capacity: 41, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  
+  // Africa
+  { id: 'gs-30', name: 'Cape Town Hub', location: { lat: -33.9249, lon: 18.4241, city: 'Cape Town', country: 'South Africa' }, status: 'online' as const, capacity: 35, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-31', name: 'Cairo Station', location: { lat: 30.0444, lon: 31.2357, city: 'Cairo', country: 'Egypt' }, status: 'online' as const, capacity: 37, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
+  { id: 'gs-32', name: 'Lagos Gateway', location: { lat: 6.5244, lon: 3.3792, city: 'Lagos', country: 'Nigeria' }, status: 'online' as const, capacity: 32, antennaType: 'Parabolic 10m', frequency: 'Ku-band' },
+  { id: 'gs-33', name: 'Nairobi Hub', location: { lat: -1.2864, lon: 36.8172, city: 'Nairobi', country: 'Kenya' }, status: 'online' as const, capacity: 33, antennaType: 'Parabolic 12m', frequency: 'Ka-band' },
+  
+  // Oceania
+  { id: 'gs-34', name: 'Auckland Station', location: { lat: -36.8485, lon: 174.7633, city: 'Auckland', country: 'New Zealand' }, status: 'online' as const, capacity: 36, antennaType: 'Parabolic 12m', frequency: 'Ku-band' },
+  { id: 'gs-35', name: 'Perth Gateway', location: { lat: -31.9505, lon: 115.8605, city: 'Perth', country: 'Australia' }, status: 'online' as const, capacity: 34, antennaType: 'Parabolic 10m', frequency: 'Ka-band' },
 ];
 
 /**

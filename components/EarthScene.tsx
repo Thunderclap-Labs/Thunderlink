@@ -13,8 +13,31 @@ import { Textarea } from '@heroui/input';
 import { Slider } from '@heroui/slider';
 import { fetchSatelliteTLEData, calculateSatellitePosition, getSatelliteInfo, SatelliteData, SatelliteInfo, GROUND_STATIONS, latLonToVector3, isSatelliteInRange } from '@/utils/satelliteUtils';
 import { useBookingStore } from '@/store/bookingStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useGroundStationStore, CustomGroundStation } from '@/store/groundStationStore';
 import { SatelliteBooking } from '@/types';
 import styles from './EarthScene.module.css';
+
+// Helper function to create circular texture for stars to prevent square appearance
+function createCircleTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d')!;
+  
+  const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.2, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 32, 32);
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
 
 export default function EarthScene() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,7 +58,8 @@ export default function EarthScene() {
 
   // Set raycaster params for easier satellite detection
   useEffect(() => {
-    raycasterRef.current.params.Points = { threshold: 0.1 };
+    raycasterRef.current.params.Points = { threshold: 0.3 };
+    raycasterRef.current.params.Line = { threshold: 0.3 };
   }, []);
   
   const [satellites, setSatellites] = useState<SatelliteData[]>([]);
@@ -49,9 +73,13 @@ export default function EarthScene() {
   const [showGroundStations, setShowGroundStations] = useState(true);
   const [showConnections, setShowConnections] = useState(true);
   const [showSatellites, setShowSatellites] = useState(true);
-  const [maxSatelliteCount, setMaxSatelliteCount] = useState<number>(30);
+  const [maxSatelliteCount, setMaxSatelliteCount] = useState<number>(200);
+  const [isGroundStationModalOpen, setIsGroundStationModalOpen] = useState(false);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<NodeJS.Timeout | null>(null);
 
   const { setGroundStations } = useBookingStore();
+  const { filters } = useSettingsStore();
+  const { customStations } = useGroundStationStore();
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -125,10 +153,15 @@ export default function EarthScene() {
       const x = (Math.random() - 0.5) * 200;
       const y = (Math.random() - 0.5) * 200;
       const z = (Math.random() - 0.5) * 200;
+      
+      // Filter out stars that are too close to prevent square appearance
+      const distance = Math.sqrt(x * x + y * y + z * z);
+      if (distance < 15) continue; // Skip stars within 15 units of center
+      
       starsVertices.push(x, y, z);
       
-      // Random star sizes for variety
-      starsSizes.push(Math.random() * 2 + 0.5);
+      // Smaller, more uniform sizes to prevent squares
+      starsSizes.push(Math.random() * 0.8 + 0.3);
       
       // Slight color variations (white to light blue)
       const color = new THREE.Color();
@@ -141,11 +174,12 @@ export default function EarthScene() {
     starsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starsColors, 3));
     
     const starsMaterial = new THREE.PointsMaterial({
-      size: 0.15,
+      size: 0.08,
       vertexColors: true,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
       sizeAttenuation: true,
+      map: createCircleTexture(),
     });
     
     const stars = new THREE.Points(starsGeometry, starsMaterial);
@@ -200,6 +234,22 @@ export default function EarthScene() {
       groundStationsGroup.add(tower);
       groundStationsGroup.add(platform);
       
+      // Add field of view cone (smaller for better visibility)
+      const fovHeight = 1.5; // Height of the cone (field of view range)
+      const fovRadius = Math.tan((30 * Math.PI) / 180) * fovHeight; // 30 degree FOV
+      const fovGeometry = new THREE.ConeGeometry(fovRadius, fovHeight, 32, 1, true);
+      const fovMaterial = new THREE.MeshBasicMaterial({
+        color: gs.status === 'online' ? 0x00ff00 : 0xff0000,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+      });
+      const fovCone = new THREE.Mesh(fovGeometry, fovMaterial);
+      fovCone.position.set(position.x, position.y, position.z);
+      fovCone.lookAt(position.x * 2, position.y * 2, position.z * 2);
+      fovCone.rotateX(-Math.PI / 2); // Point outward from Earth
+      groundStationsGroup.add(fovCone);
+      
       // Store ground station position for connection calculations
       groundStationMeshesRef.current.set(gs.id, {
         position: new THREE.Vector3(position.x, position.y, position.z),
@@ -207,8 +257,20 @@ export default function EarthScene() {
       });
     });
 
-    // Initialize ground stations in store
-    setGroundStations(GROUND_STATIONS);
+    // Merge custom ground stations with default ones and initialize in store
+    const allGroundStations = [
+      ...GROUND_STATIONS,
+      ...customStations.map(cs => ({
+        id: cs.id,
+        name: cs.name,
+        location: cs.location,
+        status: cs.status,
+        capacity: cs.capacity,
+        antennaType: cs.antennaType,
+        frequency: cs.frequency,
+      }))
+    ];
+    setGroundStations(allGroundStations);
 
     // Animation loop with real-time satellite updates
     const animate = () => {
@@ -433,13 +495,28 @@ export default function EarthScene() {
     const loadSatellites = async () => {
       setLoading(true);
       const sats = await fetchSatelliteTLEData();
-      setSatellites(sats);
-      satelliteDataRef.current = sats;
+      
+      // Apply filters from settings
+      let filteredSats = sats;
+      
+      // Filter by country if specified
+      if (filters.country && filters.country !== 'all') {
+        filteredSats = filteredSats.filter(sat => 
+          sat.category?.toLowerCase().includes(filters.country.toLowerCase())
+        );
+      }
+      
+      // Limit by amount from settings (use filters.amount or maxSatelliteCount)
+      const maxCount = filters.amount || maxSatelliteCount;
+      filteredSats = filteredSats.slice(0, maxCount);
+      
+      setSatellites(filteredSats);
+      satelliteDataRef.current = filteredSats;
       setLoading(false);
     };
 
     loadSatellites();
-  }, []);
+  }, [filters, maxSatelliteCount]);
 
   // Update satellite positions in scene
   useEffect(() => {
@@ -552,7 +629,7 @@ export default function EarthScene() {
               size="sm"
               step={10}
               minValue={10}
-              maxValue={50}
+              maxValue={500}
               value={maxSatelliteCount}
               onChange={(value: number | number[]) => setMaxSatelliteCount(value as number)}
               className="max-w-full"
@@ -567,14 +644,24 @@ export default function EarthScene() {
           >
             Book Satellite Time
           </Button>
+          <Button 
+            color="success" 
+            variant="flat"
+            fullWidth 
+            onPress={() => setIsGroundStationModalOpen(true)}
+            className="font-semibold"
+          >
+            📡 Manage Ground Stations
+          </Button>
           <div className="flex gap-2">
             <Button 
               size="sm" 
               color={showSatellites ? 'primary' : 'default'}
               onPress={() => {
-                setShowSatellites(!showSatellites);
+                const newVisibility = !showSatellites;
+                setShowSatellites(newVisibility);
                 if (satellitesRef.current) {
-                  satellitesRef.current.visible = !showSatellites;
+                  satellitesRef.current.visible = newVisibility;
                 }
               }}
               fullWidth
@@ -587,9 +674,10 @@ export default function EarthScene() {
               size="sm" 
               color={showGroundStations ? 'success' : 'default'}
               onPress={() => {
-                setShowGroundStations(!showGroundStations);
+                const newVisibility = !showGroundStations;
+                setShowGroundStations(newVisibility);
                 if (groundStationsRef.current) {
-                  groundStationsRef.current.visible = !showGroundStations;
+                  groundStationsRef.current.visible = newVisibility;
                 }
               }}
               fullWidth
@@ -613,7 +701,13 @@ export default function EarthScene() {
 
       <Modal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false);
+          if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            setAutoRefreshInterval(null);
+          }
+        }}
         size="lg"
         backdrop="blur"
       >
@@ -626,62 +720,140 @@ export default function EarthScene() {
               </ModalHeader>
               <ModalBody>
                 {selectedSatellite && (
-                  <div className="space-y-4">
-                    <Card>
-                      <CardHeader className="font-semibold">Position</CardHeader>
+                  <div className="space-y-4"
+                    // Auto-refresh satellite data every 15 seconds
+                    ref={(el) => {
+                      if (el && !autoRefreshInterval) {
+                        const interval = setInterval(() => {
+                          const satData = satelliteDataRef.current.find(s => s.name === selectedSatellite.name);
+                          if (satData) {
+                            const updatedInfo = getSatelliteInfo(satData);
+                            if (updatedInfo) {
+                              setSelectedSatellite(updatedInfo);
+                            }
+                          }
+                        }, 15000);
+                        setAutoRefreshInterval(interval);
+                      }
+                    }}
+                  >
+                    {/* Satellite Identity Card */}
+                    <Card className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
                       <CardBody>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                          <div>
-                            <span className="text-gray-500">Latitude:</span>
-                            <span className="ml-2 font-mono">
-                              {selectedSatellite.position.lat.toFixed(2)}°
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Category:</span>
+                            <Chip color="primary" size="sm" variant="flat">
+                              {selectedSatellite.category}
+                            </Chip>
+                          </div>
+                          {selectedSatellite.noradId && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">NORAD ID:</span>
+                              <span className="font-mono font-semibold text-primary">
+                                {selectedSatellite.noradId}
+                              </span>
+                            </div>
+                          )}
+                          {selectedSatellite.launchDate && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600 dark:text-gray-400">Launch Date:</span>
+                              <span className="font-mono text-sm">
+                                {selectedSatellite.launchDate}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </CardBody>
+                    </Card>
+
+                    {/* Real-time Position */}
+                    <Card>
+                      <CardHeader className="font-semibold flex items-center gap-2">
+                        <span className="text-lg">📍</span>
+                        Current Position
+                      </CardHeader>
+                      <CardBody>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <span className="text-gray-500 block text-xs mb-1">Latitude</span>
+                            <span className="font-mono font-bold text-lg">
+                              {selectedSatellite.position.lat.toFixed(4)}°
+                            </span>
+                            <span className="text-xs text-gray-500 ml-1">
+                              {selectedSatellite.position.lat >= 0 ? 'N' : 'S'}
                             </span>
                           </div>
-                          <div>
-                            <span className="text-gray-500">Longitude:</span>
-                            <span className="ml-2 font-mono">
-                              {selectedSatellite.position.lon.toFixed(2)}°
+                          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <span className="text-gray-500 block text-xs mb-1">Longitude</span>
+                            <span className="font-mono font-bold text-lg">
+                              {selectedSatellite.position.lon.toFixed(4)}°
+                            </span>
+                            <span className="text-xs text-gray-500 ml-1">
+                              {selectedSatellite.position.lon >= 0 ? 'E' : 'W'}
                             </span>
                           </div>
-                          <div className="col-span-2">
-                            <span className="text-gray-500">Altitude:</span>
-                            <span className="ml-2 font-mono">
+                          <div className="col-span-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                            <span className="text-gray-500 block text-xs mb-1">Altitude Above Earth</span>
+                            <span className="font-mono font-bold text-xl text-blue-600 dark:text-blue-400">
                               {selectedSatellite.position.alt.toFixed(2)} km
+                            </span>
+                            <span className="text-xs text-gray-500 ml-2">
+                              ({(selectedSatellite.position.alt * 0.621371).toFixed(2)} miles)
                             </span>
                           </div>
                         </div>
                       </CardBody>
                     </Card>
 
+                    {/* Orbital Dynamics */}
                     <Card>
-                      <CardHeader className="font-semibold">Orbital Data</CardHeader>
+                      <CardHeader className="font-semibold flex items-center gap-2">
+                        <span className="text-lg">🛰️</span>
+                        Orbital Data
+                      </CardHeader>
                       <CardBody>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                          <div>
-                            <span className="text-gray-500">Velocity:</span>
-                            <span className="ml-2 font-mono">
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
+                            <span className="text-gray-500 block text-xs mb-1">Velocity</span>
+                            <span className="font-mono font-bold text-lg text-purple-600 dark:text-purple-400">
                               {selectedSatellite.velocity.toFixed(2)} km/s
+                            </span>
+                            <span className="text-xs text-gray-500 block mt-1">
+                              {(selectedSatellite.velocity * 3600).toFixed(0)} km/h
                             </span>
                           </div>
                           {selectedSatellite.period && (
-                            <div>
-                              <span className="text-gray-500">Period:</span>
-                              <span className="ml-2 font-mono">
+                            <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                              <span className="text-gray-500 block text-xs mb-1">Orbital Period</span>
+                              <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
                                 {selectedSatellite.period.toFixed(0)} min
+                              </span>
+                              <span className="text-xs text-gray-500 block mt-1">
+                                {(selectedSatellite.period / 60).toFixed(2)} hours
                               </span>
                             </div>
                           )}
-                          {selectedSatellite.noradId && (
-                            <div className="col-span-2">
-                              <span className="text-gray-500">NORAD ID:</span>
-                              <span className="ml-2 font-mono">
-                                {selectedSatellite.noradId}
+                          {selectedSatellite.period && (
+                            <div className="col-span-2 p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
+                              <span className="text-gray-500 block text-xs mb-1">Orbits Per Day</span>
+                              <span className="font-mono font-bold text-lg text-orange-600 dark:text-orange-400">
+                                {(1440 / selectedSatellite.period).toFixed(2)}
+                              </span>
+                              <span className="text-xs text-gray-500 ml-2">
+                                Complete orbits around Earth per 24 hours
                               </span>
                             </div>
                           )}
                         </div>
                       </CardBody>
                     </Card>
+
+                    {/* Live Status Indicator */}
+                    <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                      <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                      Live data • Updates in real-time
+                    </div>
                   </div>
                 )}
               </ModalBody>
@@ -723,6 +895,32 @@ export default function EarthScene() {
                 <BookingSatelliteSelector 
                   satellites={satellites}
                   groundStations={GROUND_STATIONS}
+                  onClose={onClose}
+                />
+              </ModalBody>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* Ground Station Management Modal */}
+      <Modal 
+        isOpen={isGroundStationModalOpen} 
+        onClose={() => setIsGroundStationModalOpen(false)}
+        size="3xl"
+        backdrop="blur"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <h2 className="text-2xl font-bold">📡 Ground Station Management</h2>
+                <p className="text-sm text-gray-500">View all stations and register your own</p>
+              </ModalHeader>
+              <ModalBody>
+                <GroundStationManager 
+                  defaultStations={GROUND_STATIONS}
                   onClose={onClose}
                 />
               </ModalBody>
@@ -942,6 +1140,290 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
           </CardBody>
         </Card>
       )}
+    </div>
+  );
+}
+
+// Ground Station Manager Component
+interface GroundStationManagerProps {
+  defaultStations: typeof GROUND_STATIONS;
+  onClose: () => void;
+}
+
+function GroundStationManager({ defaultStations, onClose }: GroundStationManagerProps) {
+  const { customStations, addStation, removeStation, toggleStationStatus } = useGroundStationStore();
+  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [newStation, setNewStation] = useState({
+    name: '',
+    lat: 0,
+    lon: 0,
+    city: '',
+    country: '',
+    capacity: 30,
+    antennaType: 'Parabolic 10m',
+    frequency: 'Ka-band',
+    status: 'online' as const,
+  });
+
+  const handleAddStation = () => {
+    if (!newStation.name || !newStation.city || !newStation.country) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    addStation({
+      name: newStation.name,
+      location: {
+        lat: newStation.lat,
+        lon: newStation.lon,
+        city: newStation.city,
+        country: newStation.country,
+      },
+      status: newStation.status,
+      capacity: newStation.capacity,
+      antennaType: newStation.antennaType,
+      frequency: newStation.frequency,
+    });
+
+    // Reset form
+    setNewStation({
+      name: '',
+      lat: 0,
+      lon: 0,
+      city: '',
+      country: '',
+      capacity: 30,
+      antennaType: 'Parabolic 10m',
+      frequency: 'Ka-band',
+      status: 'online',
+    });
+    setIsAddingNew(false);
+  };
+
+  const allStations = [...defaultStations, ...customStations];
+
+  return (
+    <div className="space-y-4">
+      {/* Summary Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card>
+          <CardBody className="text-center">
+            <div className="text-2xl font-bold text-primary">{allStations.length}</div>
+            <div className="text-sm text-gray-500">Total Stations</div>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody className="text-center">
+            <div className="text-2xl font-bold text-green-500">
+              {allStations.filter(s => s.status === 'online').length}
+            </div>
+            <div className="text-sm text-gray-500">Online</div>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody className="text-center">
+            <div className="text-2xl font-bold text-purple-500">{customStations.length}</div>
+            <div className="text-sm text-gray-500">Custom</div>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* Add New Station Button */}
+      {!isAddingNew && (
+        <Button 
+          color="success" 
+          variant="flat"
+          fullWidth
+          onPress={() => setIsAddingNew(true)}
+          startContent={<span>➕</span>}
+        >
+          Register New Ground Station
+        </Button>
+      )}
+
+      {/* Add New Station Form */}
+      {isAddingNew && (
+        <Card className="border-2 border-success">
+          <CardHeader className="font-bold">Register New Ground Station</CardHeader>
+          <CardBody className="space-y-3">
+            <Input
+              label="Station Name"
+              placeholder="e.g., My Station Alpha"
+              value={newStation.name}
+              onChange={(e) => setNewStation({ ...newStation, name: e.target.value })}
+              isRequired
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="City"
+                placeholder="e.g., Los Angeles"
+                value={newStation.city}
+                onChange={(e) => setNewStation({ ...newStation, city: e.target.value })}
+                isRequired
+              />
+              <Input
+                label="Country"
+                placeholder="e.g., USA"
+                value={newStation.country}
+                onChange={(e) => setNewStation({ ...newStation, country: e.target.value })}
+                isRequired
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                type="number"
+                label="Latitude"
+                placeholder="e.g., 34.0522"
+                value={newStation.lat.toString()}
+                onChange={(e) => setNewStation({ ...newStation, lat: parseFloat(e.target.value) || 0 })}
+                isRequired
+              />
+              <Input
+                type="number"
+                label="Longitude"
+                placeholder="e.g., -118.2437"
+                value={newStation.lon.toString()}
+                onChange={(e) => setNewStation({ ...newStation, lon: parseFloat(e.target.value) || 0 })}
+                isRequired
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Antenna Type"
+                selectedKeys={[newStation.antennaType]}
+                onChange={(e) => setNewStation({ ...newStation, antennaType: e.target.value })}
+              >
+                <SelectItem key="Parabolic 10m" value="Parabolic 10m">Parabolic 10m</SelectItem>
+                <SelectItem key="Parabolic 12m" value="Parabolic 12m">Parabolic 12m</SelectItem>
+                <SelectItem key="Parabolic 15m" value="Parabolic 15m">Parabolic 15m</SelectItem>
+                <SelectItem key="Phased Array" value="Phased Array">Phased Array</SelectItem>
+              </Select>
+              <Select
+                label="Frequency Band"
+                selectedKeys={[newStation.frequency]}
+                onChange={(e) => setNewStation({ ...newStation, frequency: e.target.value })}
+              >
+                <SelectItem key="Ka-band" value="Ka-band">Ka-band</SelectItem>
+                <SelectItem key="Ku-band" value="Ku-band">Ku-band</SelectItem>
+                <SelectItem key="C-band" value="C-band">C-band</SelectItem>
+                <SelectItem key="X-band" value="X-band">X-band</SelectItem>
+              </Select>
+            </div>
+            <Input
+              type="number"
+              label="Capacity (Mbps)"
+              value={newStation.capacity.toString()}
+              onChange={(e) => setNewStation({ ...newStation, capacity: parseInt(e.target.value) || 30 })}
+            />
+            <div className="flex gap-2">
+              <Button color="success" onPress={handleAddStation} fullWidth>
+                Add Station
+              </Button>
+              <Button color="default" variant="light" onPress={() => setIsAddingNew(false)} fullWidth>
+                Cancel
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Stations List */}
+      <div className="space-y-2 max-h-96 overflow-y-auto">
+        <h3 className="font-bold text-lg mb-2">All Ground Stations ({allStations.length})</h3>
+        
+        {/* Default Stations */}
+        <div className="space-y-2">
+          <h4 className="font-semibold text-sm text-gray-500">Default Network</h4>
+          {defaultStations.map((station) => (
+            <Card key={station.id} className="bg-gradient-to-r from-blue-500/10 to-purple-500/10">
+              <CardBody className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">{station.name}</span>
+                      <Chip 
+                        size="sm" 
+                        color={station.status === 'online' ? 'success' : 'danger'}
+                        variant="flat"
+                      >
+                        {station.status}
+                      </Chip>
+                    </div>
+                    <div className="text-sm text-gray-500 mt-1">
+                      📍 {station.location.city}, {station.location.country} 
+                      <span className="ml-3">📡 {station.antennaType}</span>
+                      <span className="ml-3">📶 {station.frequency}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      Lat: {station.location.lat.toFixed(4)}°, Lon: {station.location.lon.toFixed(4)}° 
+                      • Capacity: {station.capacity} Mbps
+                    </div>
+                  </div>
+                </div>
+              </CardBody>
+            </Card>
+          ))}
+        </div>
+
+        {/* Custom Stations */}
+        {customStations.length > 0 && (
+          <div className="space-y-2 mt-4">
+            <h4 className="font-semibold text-sm text-gray-500">Your Custom Stations</h4>
+            {customStations.map((station) => (
+              <Card key={station.id} className="bg-gradient-to-r from-green-500/10 to-teal-500/10 border border-green-500/30">
+                <CardBody className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">{station.name}</span>
+                        <Chip size="sm" color="secondary" variant="flat">Custom</Chip>
+                        <Chip 
+                          size="sm" 
+                          color={station.status === 'online' ? 'success' : 'danger'}
+                          variant="flat"
+                        >
+                          {station.status}
+                        </Chip>
+                      </div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        📍 {station.location.city}, {station.location.country} 
+                        <span className="ml-3">📡 {station.antennaType}</span>
+                        <span className="ml-3">📶 {station.frequency}</span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        Lat: {station.location.lat.toFixed(4)}°, Lon: {station.location.lon.toFixed(4)}° 
+                        • Capacity: {station.capacity} Mbps
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        color={station.status === 'online' ? 'warning' : 'success'}
+                        variant="flat"
+                        onPress={() => toggleStationStatus(station.id)}
+                      >
+                        {station.status === 'online' ? 'Offline' : 'Online'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        color="danger"
+                        variant="light"
+                        onPress={() => {
+                          if (confirm(`Remove ${station.name}?`)) {
+                            removeStation(station.id);
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
