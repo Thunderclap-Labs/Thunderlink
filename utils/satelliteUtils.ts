@@ -1,4 +1,5 @@
 import * as satellite from 'satellite.js';
+import { GroundStation } from '@/types';
 
 export interface SatelliteData {
   name: string;
@@ -17,6 +18,93 @@ export interface SatelliteInfo {
   noradId?: string;
   launchDate?: string;
   period?: number;
+}
+
+/**
+ * Ground stations around the world for satellite communication
+ */
+export const GROUND_STATIONS: GroundStation[] = [
+  // North America
+  { id: 'gs-001', name: 'Svalbard Ground Station', location: { lat: 78.2295, lon: 15.3868, city: 'Svalbard', country: 'Norway' }, status: 'online', capacity: 8, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  { id: 'gs-002', name: 'Alaska Ground Station', location: { lat: 64.8378, lon: -147.7164, city: 'Fairbanks', country: 'USA' }, status: 'online', capacity: 12, antennaType: 'S/X-Band', frequency: '2.2-8.4 GHz' },
+  { id: 'gs-003', name: 'California Ground Station', location: { lat: 37.7749, lon: -122.4194, city: 'San Francisco', country: 'USA' }, status: 'online', capacity: 10, antennaType: 'Ka-Band', frequency: '26.5-40 GHz' },
+  { id: 'gs-004', name: 'Virginia Ground Station', location: { lat: 37.4316, lon: -78.6569, city: 'Virginia', country: 'USA' }, status: 'online', capacity: 10, antennaType: 'S/X-Band', frequency: '2.2-8.4 GHz' },
+  
+  // South America
+  { id: 'gs-005', name: 'Brazil Ground Station', location: { lat: -15.7975, lon: -47.8919, city: 'Brasília', country: 'Brazil' }, status: 'online', capacity: 8, antennaType: 'S-Band', frequency: '2.2-2.3 GHz' },
+  { id: 'gs-006', name: 'Chile Ground Station', location: { lat: -33.4489, lon: -70.6693, city: 'Santiago', country: 'Chile' }, status: 'online', capacity: 6, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  
+  // Europe
+  { id: 'gs-007', name: 'Germany Ground Station', location: { lat: 48.0817, lon: 11.2750, city: 'Munich', country: 'Germany' }, status: 'online', capacity: 12, antennaType: 'Ka-Band', frequency: '26.5-40 GHz' },
+  { id: 'gs-008', name: 'UK Ground Station', location: { lat: 51.5074, lon: -0.1278, city: 'London', country: 'UK' }, status: 'online', capacity: 10, antennaType: 'S/X-Band', frequency: '2.2-8.4 GHz' },
+  { id: 'gs-009', name: 'Spain Ground Station', location: { lat: 28.2916, lon: -16.6291, city: 'Canary Islands', country: 'Spain' }, status: 'online', capacity: 8, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  
+  // Asia
+  { id: 'gs-010', name: 'Japan Ground Station', location: { lat: 35.6762, lon: 139.6503, city: 'Tokyo', country: 'Japan' }, status: 'online', capacity: 15, antennaType: 'Ka-Band', frequency: '26.5-40 GHz' },
+  { id: 'gs-011', name: 'Singapore Ground Station', location: { lat: 1.3521, lon: 103.8198, city: 'Singapore', country: 'Singapore' }, status: 'online', capacity: 12, antennaType: 'S/X-Band', frequency: '2.2-8.4 GHz' },
+  { id: 'gs-012', name: 'India Ground Station', location: { lat: 28.6139, lon: 77.2090, city: 'New Delhi', country: 'India' }, status: 'online', capacity: 10, antennaType: 'S-Band', frequency: '2.2-2.3 GHz' },
+  { id: 'gs-013', name: 'South Korea Ground Station', location: { lat: 37.5665, lon: 126.9780, city: 'Seoul', country: 'South Korea' }, status: 'online', capacity: 12, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  
+  // Australia & Oceania
+  { id: 'gs-014', name: 'Australia Ground Station', location: { lat: -35.2809, lon: 149.1300, city: 'Canberra', country: 'Australia' }, status: 'online', capacity: 10, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  { id: 'gs-015', name: 'New Zealand Ground Station', location: { lat: -41.2865, lon: 174.7762, city: 'Wellington', country: 'New Zealand' }, status: 'online', capacity: 6, antennaType: 'S-Band', frequency: '2.2-2.3 GHz' },
+  
+  // Africa
+  { id: 'gs-016', name: 'South Africa Ground Station', location: { lat: -25.7479, lon: 28.2293, city: 'Pretoria', country: 'South Africa' }, status: 'online', capacity: 8, antennaType: 'X-Band', frequency: '8.0-8.4 GHz' },
+  { id: 'gs-017', name: 'Kenya Ground Station', location: { lat: -1.2921, lon: 36.8219, city: 'Nairobi', country: 'Kenya' }, status: 'online', capacity: 6, antennaType: 'S-Band', frequency: '2.2-2.3 GHz' },
+  
+  // Middle East
+  { id: 'gs-018', name: 'UAE Ground Station', location: { lat: 25.2048, lon: 55.2708, city: 'Dubai', country: 'UAE' }, status: 'online', capacity: 10, antennaType: 'Ka-Band', frequency: '26.5-40 GHz' },
+  
+  // Arctic & Antarctic
+  { id: 'gs-019', name: 'Antarctica Ground Station', location: { lat: -77.8467, lon: 166.6686, city: 'McMurdo', country: 'Antarctica' }, status: 'online', capacity: 4, antennaType: 'S-Band', frequency: '2.2-2.3 GHz' },
+];
+
+/**
+ * Convert latitude and longitude to 3D coordinates on sphere
+ */
+export function latLonToVector3(lat: number, lon: number, radius: number): { x: number; y: number; z: number } {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
+
+  const x = -(radius * Math.sin(phi) * Math.cos(theta));
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+  const y = radius * Math.cos(phi);
+
+  return { x, y, z };
+}
+
+/**
+ * Calculate if a satellite is in range of a ground station
+ * Uses horizon distance formula considering Earth's curvature
+ */
+export function isSatelliteInRange(
+  satPosition: { x: number; y: number; z: number },
+  gsPosition: { x: number; y: number; z: number },
+  minElevationAngle: number = 10 // degrees
+): boolean {
+  // Calculate vector from ground station to satellite
+  const dx = satPosition.x - gsPosition.x;
+  const dy = satPosition.y - gsPosition.y;
+  const dz = satPosition.z - gsPosition.z;
+  const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  
+  // Calculate ground station's distance from origin (Earth center)
+  const gsDistance = Math.sqrt(gsPosition.x * gsPosition.x + gsPosition.y * gsPosition.y + gsPosition.z * gsPosition.z);
+  
+  // Calculate satellite's distance from origin
+  const satDistance = Math.sqrt(satPosition.x * satPosition.x + satPosition.y * satPosition.y + satPosition.z * satPosition.z);
+  
+  // Calculate elevation angle using dot product
+  const dotProduct = (satPosition.x * gsPosition.x + satPosition.y * gsPosition.y + satPosition.z * gsPosition.z);
+  const cosAngle = dotProduct / (satDistance * gsDistance);
+  
+  // Calculate angle from ground station horizon
+  const angleFromCenter = Math.acos(cosAngle) * (180 / Math.PI);
+  const elevationAngle = angleFromCenter - 90;
+  
+  // Satellite is in range if elevation angle is above minimum
+  return elevationAngle >= minElevationAngle && distance < 50; // Also check reasonable distance
 }
 
 /**

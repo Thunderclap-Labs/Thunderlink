@@ -7,7 +7,9 @@ import { Button } from '@heroui/button';
 import { Card, CardBody, CardHeader } from '@heroui/card';
 import { Chip } from '@heroui/chip';
 import { Spinner } from '@heroui/spinner';
-import { fetchSatelliteTLEData, calculateSatellitePosition, getSatelliteInfo, SatelliteData, SatelliteInfo } from '@/utils/satelliteUtils';
+import { fetchSatelliteTLEData, calculateSatellitePosition, getSatelliteInfo, SatelliteData, SatelliteInfo, GROUND_STATIONS, latLonToVector3, isSatelliteInRange } from '@/utils/satelliteUtils';
+import { useBookingStore } from '@/store/bookingStore';
+import { SatelliteBooking } from '@/types';
 import styles from './EarthScene.module.css';
 
 export default function EarthScene() {
@@ -17,8 +19,11 @@ export default function EarthScene() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const earthRef = useRef<THREE.Mesh | null>(null);
   const satellitesRef = useRef<THREE.Group | null>(null);
+  const groundStationsRef = useRef<THREE.Group | null>(null);
+  const connectionLinesRef = useRef<THREE.Group | null>(null);
   const satelliteDataRef = useRef<SatelliteData[]>([]);
   const satelliteMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  const groundStationMeshesRef = useRef<Map<string, { position: THREE.Vector3; mesh: THREE.Mesh }>>(new Map());
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const animationFrameRef = useRef<number | null>(null);
@@ -33,8 +38,14 @@ export default function EarthScene() {
   const [hoveredSatellite, setHoveredSatellite] = useState<string | null>(null);
   const [selectedSatellite, setSelectedSatellite] = useState<SatelliteInfo | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [activeConnections, setActiveConnections] = useState<number>(0);
+  const [showGroundStations, setShowGroundStations] = useState(true);
+  const [showConnections, setShowConnections] = useState(true);
+
+  const { setGroundStations } = useBookingStore();
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -139,6 +150,60 @@ export default function EarthScene() {
     scene.add(satellitesGroup);
     satellitesRef.current = satellitesGroup;
 
+    // Ground stations group
+    const groundStationsGroup = new THREE.Group();
+    scene.add(groundStationsGroup);
+    groundStationsRef.current = groundStationsGroup;
+
+    // Connection lines group
+    const connectionLinesGroup = new THREE.Group();
+    scene.add(connectionLinesGroup);
+    connectionLinesRef.current = connectionLinesGroup;
+
+    // Add ground stations to the scene
+    const EARTH_RADIUS = 2;
+    GROUND_STATIONS.forEach((gs) => {
+      const position = latLonToVector3(gs.location.lat, gs.location.lon, EARTH_RADIUS + 0.02);
+      
+      // Create ground station marker (antenna tower)
+      const towerGeometry = new THREE.ConeGeometry(0.03, 0.1, 8);
+      const towerMaterial = new THREE.MeshPhongMaterial({
+        color: gs.status === 'online' ? 0x00ff00 : 0xff0000,
+        emissive: gs.status === 'online' ? 0x00aa00 : 0xaa0000,
+        emissiveIntensity: 0.5,
+      });
+      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
+      tower.position.set(position.x, position.y, position.z);
+      
+      // Point tower upward from Earth's center
+      tower.lookAt(position.x * 2, position.y * 2, position.z * 2);
+      tower.rotateX(Math.PI / 2);
+      
+      tower.userData.groundStation = gs;
+      
+      // Add base platform
+      const platformGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.01, 16);
+      const platformMaterial = new THREE.MeshPhongMaterial({
+        color: 0x444444,
+      });
+      const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+      platform.position.set(position.x, position.y, position.z);
+      platform.lookAt(position.x * 2, position.y * 2, position.z * 2);
+      platform.rotateX(Math.PI / 2);
+      
+      groundStationsGroup.add(tower);
+      groundStationsGroup.add(platform);
+      
+      // Store ground station position for connection calculations
+      groundStationMeshesRef.current.set(gs.id, {
+        position: new THREE.Vector3(position.x, position.y, position.z),
+        mesh: tower,
+      });
+    });
+
+    // Initialize ground stations in store
+    setGroundStations(GROUND_STATIONS);
+
     // Animation loop with real-time satellite updates
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -157,6 +222,14 @@ export default function EarthScene() {
       if (!satellitesRef.current || satelliteDataRef.current.length === 0) return;
       
       const currentDate = new Date();
+      let connections = 0;
+      
+      // Clear existing connection lines
+      if (connectionLinesRef.current) {
+        while (connectionLinesRef.current.children.length > 0) {
+          connectionLinesRef.current.remove(connectionLinesRef.current.children[0]);
+        }
+      }
       
       satelliteDataRef.current.forEach((sat) => {
         if (!sat.satrec) return;
@@ -167,8 +240,32 @@ export default function EarthScene() {
         const satelliteMesh = satelliteMeshesRef.current.get(sat.name);
         if (satelliteMesh) {
           satelliteMesh.position.set(position.x, position.y, position.z);
+          
+          // Check connections to ground stations
+          groundStationMeshesRef.current.forEach((gs) => {
+            if (isSatelliteInRange(position, gs.position, 10)) {
+              connections++;
+              
+              // Draw connection line
+              if (connectionLinesRef.current && showConnections) {
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                  new THREE.Vector3(position.x, position.y, position.z),
+                  gs.position,
+                ]);
+                const lineMaterial = new THREE.LineBasicMaterial({
+                  color: 0x00ffff,
+                  transparent: true,
+                  opacity: 0.3,
+                });
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                connectionLinesRef.current.add(line);
+              }
+            }
+          });
         }
       });
+      
+      setActiveConnections(connections);
     };
     
     animate();
@@ -313,7 +410,7 @@ export default function EarthScene() {
       
       renderer.dispose();
     };
-  }, []);
+  }, [setGroundStations, showConnections]);
 
   // Fetch satellites
   useEffect(() => {
@@ -400,6 +497,7 @@ export default function EarthScene() {
       {hoveredSatellite && (
         <div
           className={styles.tooltip}
+          /* eslint-disable-next-line react/forbid-dom-props */
           style={{
             left: `${tooltipPosition.x + 10}px`,
             top: `${tooltipPosition.y + 10}px`,
@@ -409,10 +507,56 @@ export default function EarthScene() {
         </div>
       )}
 
-      <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg backdrop-blur-sm">
-        <h3 className="text-lg font-bold mb-2">Satellite Tracker</h3>
-        <p className="text-sm">Satellites: {satellites.length}</p>
-        <p className="text-xs text-gray-400 mt-2">
+      <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg backdrop-blur-sm max-w-xs">
+        <h3 className="text-lg font-bold mb-3">Thunderlink Network</h3>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span>Satellites:</span>
+            <span className="font-bold text-blue-400">{satellites.length}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Ground Stations:</span>
+            <span className="font-bold text-green-400">{GROUND_STATIONS.length}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Active Connections:</span>
+            <span className="font-bold text-cyan-400">{activeConnections}</span>
+          </div>
+        </div>
+        <div className="mt-4 space-y-2">
+          <Button 
+            color="primary" 
+            fullWidth 
+            onPress={() => setIsBookingModalOpen(true)}
+            className="font-semibold"
+          >
+            Book Satellite Time
+          </Button>
+          <div className="flex gap-2">
+            <Button 
+              size="sm" 
+              color={showGroundStations ? 'success' : 'default'}
+              onPress={() => {
+                setShowGroundStations(!showGroundStations);
+                if (groundStationsRef.current) {
+                  groundStationsRef.current.visible = !showGroundStations;
+                }
+              }}
+              fullWidth
+            >
+              {showGroundStations ? 'Hide' : 'Show'} Stations
+            </Button>
+            <Button 
+              size="sm" 
+              color={showConnections ? 'primary' : 'default'}
+              onPress={() => setShowConnections(!showConnections)}
+              fullWidth
+            >
+              {showConnections ? 'Hide' : 'Show'} Links
+            </Button>
+          </div>
+        </div>
+        <p className="text-xs text-gray-400 mt-3">
           Drag to rotate • Click satellite for info
         </p>
       </div>
@@ -492,14 +636,269 @@ export default function EarthScene() {
                 )}
               </ModalBody>
               <ModalFooter>
-                <Button color="primary" onPress={onClose}>
+                <Button color="default" variant="light" onPress={onClose}>
                   Close
+                </Button>
+                <Button 
+                  color="primary" 
+                  onPress={() => {
+                    onClose();
+                    setIsBookingModalOpen(true);
+                  }}
+                >
+                  Book This Satellite
                 </Button>
               </ModalFooter>
             </>
           )}
         </ModalContent>
       </Modal>
+
+      {/* Booking Modal */}
+      <Modal 
+        isOpen={isBookingModalOpen} 
+        onClose={() => setIsBookingModalOpen(false)}
+        size="2xl"
+        backdrop="blur"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <h2 className="text-2xl font-bold">Book Satellite Time</h2>
+                <p className="text-sm text-gray-500">Select a satellite and time slot to get started</p>
+              </ModalHeader>
+              <ModalBody>
+                <BookingSatelliteSelector 
+                  satellites={satellites}
+                  groundStations={GROUND_STATIONS}
+                  onClose={onClose}
+                />
+              </ModalBody>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+    </div>
+  );
+}
+
+// Booking Satellite Selector Component
+interface BookingSelectorProps {
+  satellites: SatelliteData[];
+  groundStations: typeof GROUND_STATIONS;
+  onClose: () => void;
+}
+
+function BookingSatelliteSelector({ satellites, groundStations, onClose }: BookingSelectorProps) {
+  const { addBooking } = useBookingStore();
+  const [selectedSatellite, setSelectedSatellite] = useState<string>('');
+  const [duration, setDuration] = useState<number>(30);
+  const [startTime, setStartTime] = useState<string>('');
+  const [purpose, setPurpose] = useState<string>('');
+  
+  // Calculate price based on satellite type and duration
+  const calculatePrice = (satName: string, durationMinutes: number): number => {
+    const satellite = satellites.find(s => s.name === satName);
+    if (!satellite) return 0;
+    
+    // Base price per minute based on orbit type
+    const category = satellite.category || '';
+    let pricePerMinute = 10; // Default $10/min
+    
+    if (category.includes('Geostationary') || category.includes('GEO')) {
+      pricePerMinute = 25; // $25/min for GEO
+    } else if (category.includes('Intelsat') || category.includes('SES')) {
+      pricePerMinute = 30; // Premium pricing
+    } else if (category.includes('Iridium') || category.includes('Globalstar')) {
+      pricePerMinute = 15; // LEO constellation pricing
+    }
+    
+    return pricePerMinute * durationMinutes;
+  };
+  
+  const price = selectedSatellite ? calculatePrice(selectedSatellite, duration) : 0;
+  
+  const handleBooking = () => {
+    if (!selectedSatellite || !startTime || !purpose) {
+      alert('Please fill in all fields');
+      return;
+    }
+    
+    const satellite = satellites.find(s => s.name === selectedSatellite);
+    if (!satellite) return;
+    
+    const start = new Date(startTime);
+    const end = new Date(start.getTime() + duration * 60000);
+    
+    // Find available ground stations for this satellite
+    const availableStations = groundStations
+      .filter(gs => gs.status === 'online')
+      .slice(0, 3)
+      .map(gs => gs.id);
+    
+    const booking: SatelliteBooking = {
+      id: `booking-${Date.now()}`,
+      satelliteName: satellite.name,
+      satelliteId: satellite.tleLine1.substring(2, 7).trim(),
+      startTime: start,
+      endTime: end,
+      duration,
+      price,
+      status: 'pending',
+      groundStations: availableStations,
+      dataRate: '100 Mbps',
+      purpose,
+    };
+    
+    addBooking(booking);
+    alert(`Booking confirmed! Total: $${price.toLocaleString()}`);
+    onClose();
+  };
+  
+  return (
+    <div className="space-y-6">
+      {/* Satellite Selection */}
+      <Card>
+        <CardHeader className="font-semibold">Select Satellite</CardHeader>
+        <CardBody>
+          <select
+            className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600"
+            value={selectedSatellite}
+            onChange={(e) => setSelectedSatellite(e.target.value)}
+            title="Select a satellite"
+            aria-label="Select a satellite"
+          >
+            <option value="">Choose a satellite...</option>
+            {satellites.slice(0, 50).map((sat) => (
+              <option key={sat.name} value={sat.name}>
+                {sat.name} - {sat.category}
+              </option>
+            ))}
+          </select>
+        </CardBody>
+      </Card>
+      
+      {/* Time Selection */}
+      <Card>
+        <CardHeader className="font-semibold">Schedule</CardHeader>
+        <CardBody className="space-y-4">
+          <div>
+            <label className="block text-sm mb-2">Start Time</label>
+            <input
+              type="datetime-local"
+              className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              min={new Date().toISOString().slice(0, 16)}
+              title="Select start time"
+              aria-label="Select start time"
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-2">Duration: {duration} minutes</label>
+            <input
+              type="range"
+              min="15"
+              max="240"
+              step="15"
+              value={duration}
+              onChange={(e) => setDuration(parseInt(e.target.value))}
+              className="w-full"
+              title="Select duration"
+              aria-label="Select booking duration"
+            />
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>15 min</span>
+              <span>240 min (4 hrs)</span>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+      
+      {/* Purpose */}
+      <Card>
+        <CardHeader className="font-semibold">Purpose</CardHeader>
+        <CardBody>
+          <textarea
+            className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600 resize-none"
+            rows={3}
+            placeholder="Brief description of your mission (e.g., Earth observation, data relay, research)"
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+          />
+        </CardBody>
+      </Card>
+      
+      {/* Features & Network Info */}
+      <Card>
+        <CardHeader className="font-semibold">Network Features</CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <div className="text-gray-400">Ground Stations</div>
+              <div className="font-bold text-green-400">{groundStations.length} worldwide</div>
+            </div>
+            <div>
+              <div className="text-gray-400">Coverage</div>
+              <div className="font-bold">Global 24/7</div>
+            </div>
+            <div>
+              <div className="text-gray-400">Data Rate</div>
+              <div className="font-bold">Up to 1 Gbps</div>
+            </div>
+            <div>
+              <div className="text-gray-400">Latency</div>
+              <div className="font-bold">20-40ms</div>
+            </div>
+          </div>
+          <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <p className="text-sm text-blue-300">
+              ⚡ With our global ground station network, you can connect to any satellite 
+              anytime, anywhere - not just when it passes over your location!
+            </p>
+          </div>
+        </CardBody>
+      </Card>
+      
+      {/* Price Summary */}
+      {selectedSatellite && (
+        <Card>
+          <CardHeader className="font-semibold">Price Summary</CardHeader>
+          <CardBody>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Duration:</span>
+                <span>{duration} minutes</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Rate:</span>
+                <span>${(price / duration).toFixed(2)}/min</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Network Access:</span>
+                <span>Included</span>
+              </div>
+              <div className="border-t border-gray-600 pt-2 mt-2"></div>
+              <div className="flex justify-between text-lg font-bold">
+                <span>Total:</span>
+                <span className="text-green-400">${price.toLocaleString()}</span>
+              </div>
+            </div>
+            <Button 
+              color="primary" 
+              size="lg"
+              fullWidth
+              className="mt-4"
+              onPress={handleBooking}
+              isDisabled={!selectedSatellite || !startTime || !purpose}
+            >
+              Confirm Booking
+            </Button>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }
