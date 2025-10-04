@@ -18,6 +18,7 @@ import { useBookingStore } from '@/store/bookingStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useGroundStationStore, CustomGroundStation } from '@/store/groundStationStore';
 import { SatelliteBooking } from '@/types';
+import { calculateDownlinkDataRate, getCurrentSolarActivity, getCurrentWeather, getOptimalFrequencyBand, formatDataRate, getRiskLevelColor, getCertaintyDescription, getWeatherEmoji, getWeatherDisplayName, getSolarActivityEmoji, getSolarActivityDisplayName, getSolarActivityColor, type FrequencyBand, type DetailedWeatherData, type SolarActivityData } from '@/utils/downlinkCalculations';
 import styles from './EarthScene.module.css';
 
 // Helper function to create circular texture for stars to prevent square appearance
@@ -1662,6 +1663,24 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
   const [bookingType, setBookingType] = useState<'instant' | 'auction'>('instant');
   const [bidAmount, setBidAmount] = useState<number>(0);
   const [auctionDuration, setAuctionDuration] = useState<number>(24); // hours
+  const [selectedFrequencyBand, setSelectedFrequencyBand] = useState<FrequencyBand>('Ka-band');
+  
+  // Downlink prediction (calculate when satellite and ground station are selected)
+  const downlinkPrediction = selectedSatellite && selectedGroundStation ? (() => {
+    const solarActivity = getCurrentSolarActivity();
+    const weather = getCurrentWeather(selectedGroundStation.location.lat, selectedGroundStation.location.lon);
+    // Simulate elevation angle (in production, calculate from satellite position)
+    const elevationAngle = 45 + Math.random() * 30; // 45-75 degrees
+    
+    return calculateDownlinkDataRate(
+      selectedFrequencyBand,
+      elevationAngle,
+      solarActivity,
+      weather,
+      selectedGroundStation.location.lat,
+      selectedGroundStation.location.lon
+    );
+  })() : null;
   
   // Calculate price based on satellite type and duration
   const calculatePrice = (satName: string, durationMinutes: number): number => {
@@ -1828,6 +1847,430 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
           </Select>
         </CardBody>
       </Card>
+      
+      {/* Downlink Data Rate Prediction */}
+      {selectedSatellite && selectedGroundStation && downlinkPrediction && (
+        <Card className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-2 border-cyan-500/30">
+          <CardHeader className="font-semibold flex items-center gap-2">
+            <span className="text-xl">📡</span>
+            Projected Downlink Performance
+            <Chip 
+              size="sm" 
+              color={getRiskLevelColor(downlinkPrediction.riskLevel) as any}
+              variant="flat"
+              className="ml-auto"
+            >
+              {downlinkPrediction.riskLevel.toUpperCase()} RISK
+            </Chip>
+          </CardHeader>
+          <CardBody className="space-y-4">
+            {/* Frequency Band Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">Frequency Band</label>
+              <Select
+                selectedKeys={[selectedFrequencyBand]}
+                onChange={(e) => setSelectedFrequencyBand(e.target.value as FrequencyBand)}
+                size="sm"
+              >
+                <SelectItem key="Ka-band">Ka-band (26.5-40 GHz) - High Speed</SelectItem>
+                <SelectItem key="Ku-band">Ku-band (12-18 GHz) - Balanced</SelectItem>
+                <SelectItem key="X-band">X-band (8-12 GHz) - Reliable</SelectItem>
+                <SelectItem key="C-band">C-band (4-8 GHz) - Weather Resistant</SelectItem>
+                <SelectItem key="S-band">S-band (2-4 GHz) - Robust</SelectItem>
+                <SelectItem key="L-band">L-band (1-2 GHz) - Most Stable</SelectItem>
+              </Select>
+            </div>
+
+            {/* Data Rate Display */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                <div className="text-xs text-gray-400">Ideal Conditions</div>
+                <div className="font-bold text-xl text-blue-400">
+                  {formatDataRate(downlinkPrediction.baseDataRate)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">Maximum possible</div>
+              </div>
+              <div className="p-3 bg-green-500/10 rounded-lg border border-green-500/30">
+                <div className="text-xs text-gray-400">Projected Rate</div>
+                <div className="font-bold text-xl text-green-400">
+                  {formatDataRate(downlinkPrediction.adjustedDataRate)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {Math.round((downlinkPrediction.adjustedDataRate / downlinkPrediction.baseDataRate) * 100)}% of ideal
+                </div>
+              </div>
+            </div>
+
+            {/* Certainty Factor */}
+            <div className="p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Prediction Certainty</span>
+                <Chip size="sm" variant="flat" color="secondary">
+                  {getCertaintyDescription(downlinkPrediction.certaintyFactor)}
+                </Chip>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-500"
+                  style={{ width: `${downlinkPrediction.certaintyFactor * 100}%` }}
+                />
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                {(downlinkPrediction.certaintyFactor * 100).toFixed(1)}% confidence in prediction
+              </div>
+            </div>
+
+            {/* Environmental Factors */}
+            <div>
+              <div className="text-sm font-semibold mb-2">Environmental Impact Factors</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center justify-between p-2 bg-default-100 rounded">
+                  <span>☀️ Solar Activity</span>
+                  <span className={`font-bold ${
+                    downlinkPrediction.degradationFactors.solar > 0.9 ? 'text-green-400' :
+                    downlinkPrediction.degradationFactors.solar > 0.7 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {(downlinkPrediction.degradationFactors.solar * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-default-100 rounded">
+                  <span>🌧️ Weather</span>
+                  <span className={`font-bold ${
+                    downlinkPrediction.degradationFactors.weather > 0.9 ? 'text-green-400' :
+                    downlinkPrediction.degradationFactors.weather > 0.7 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {(downlinkPrediction.degradationFactors.weather * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-default-100 rounded">
+                  <span>🌍 Atmospheric</span>
+                  <span className={`font-bold ${
+                    downlinkPrediction.degradationFactors.atmospheric > 0.9 ? 'text-green-400' :
+                    downlinkPrediction.degradationFactors.atmospheric > 0.7 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {(downlinkPrediction.degradationFactors.atmospheric * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-default-100 rounded">
+                  <span>📐 Elevation</span>
+                  <span className={`font-bold ${
+                    downlinkPrediction.degradationFactors.elevation > 0.9 ? 'text-green-400' :
+                    downlinkPrediction.degradationFactors.elevation > 0.7 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {(downlinkPrediction.degradationFactors.elevation * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed Weather Conditions */}
+            <Card className="bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/30">
+              <CardHeader className="font-semibold flex items-center gap-2">
+                {getWeatherEmoji(downlinkPrediction.weatherData.condition)}
+                <span>Current Weather Conditions</span>
+                <Chip size="sm" variant="flat" color={
+                  downlinkPrediction.weatherData.condition === 'clear' || downlinkPrediction.weatherData.condition === 'partly-cloudy' ? 'success' :
+                  downlinkPrediction.weatherData.condition === 'overcast' ? 'warning' : 'danger'
+                }>
+                  {getWeatherDisplayName(downlinkPrediction.weatherData.condition)}
+                </Chip>
+              </CardHeader>
+              <CardBody>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Cloud Coverage</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.cloudCoverage.toFixed(0)}%
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                      <div 
+                        className="bg-blue-400 h-full rounded-full"
+                        style={{ width: `${downlinkPrediction.weatherData.cloudCoverage}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Temperature</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.temperature.toFixed(1)}°C
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {(downlinkPrediction.weatherData.temperature * 9/5 + 32).toFixed(1)}°F
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Precipitation</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.precipitationRate.toFixed(1)} mm/hr
+                    </div>
+                    <div className={`text-xs ${
+                      downlinkPrediction.weatherData.precipitationRate === 0 ? 'text-green-400' :
+                      downlinkPrediction.weatherData.precipitationRate < 5 ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {downlinkPrediction.weatherData.precipitationRate === 0 ? 'None' :
+                       downlinkPrediction.weatherData.precipitationRate < 5 ? 'Light' : 'Heavy'}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Humidity</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.humidity.toFixed(0)}%
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                      <div 
+                        className="bg-cyan-400 h-full rounded-full"
+                        style={{ width: `${downlinkPrediction.weatherData.humidity}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Visibility</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.visibility.toFixed(1)} km
+                    </div>
+                    <div className={`text-xs ${
+                      downlinkPrediction.weatherData.visibility > 10 ? 'text-green-400' :
+                      downlinkPrediction.weatherData.visibility > 5 ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {downlinkPrediction.weatherData.visibility > 10 ? 'Excellent' :
+                       downlinkPrediction.weatherData.visibility > 5 ? 'Good' : 'Poor'}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Wind Speed</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.windSpeed.toFixed(0)} km/h
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {(downlinkPrediction.weatherData.windSpeed * 0.621371).toFixed(0)} mph
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded col-span-2">
+                    <div className="text-gray-500 mb-1">Atmospheric Pressure</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.weatherData.atmosphericPressure.toFixed(1)} hPa
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {(downlinkPrediction.weatherData.atmosphericPressure * 0.02953).toFixed(2)} inHg
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 p-2 bg-blue-500/10 rounded text-xs text-blue-300">
+                  💡 Weather conditions directly affect signal quality, especially for high-frequency bands like Ka and Ku.
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Solar Activity Details */}
+            <Card className="bg-gradient-to-r from-orange-500/10 to-yellow-500/10 border border-orange-500/30">
+              <CardHeader className="font-semibold flex items-center gap-2">
+                {getSolarActivityEmoji(downlinkPrediction.solarData.level)}
+                <span>Solar Activity & Ionosphere</span>
+                <Chip 
+                  size="sm" 
+                  variant="flat" 
+                  color={getSolarActivityColor(downlinkPrediction.solarData.level) as any}
+                >
+                  {getSolarActivityDisplayName(downlinkPrediction.solarData.level)}
+                </Chip>
+              </CardHeader>
+              <CardBody>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Solar Flux Index</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.solarData.solarFluxIndex.toFixed(0)} SFU
+                    </div>
+                    <div className={`text-xs ${
+                      downlinkPrediction.solarData.solarFluxIndex < 100 ? 'text-green-400' :
+                      downlinkPrediction.solarData.solarFluxIndex < 150 ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {downlinkPrediction.solarData.solarFluxIndex < 100 ? 'Low' :
+                       downlinkPrediction.solarData.solarFluxIndex < 150 ? 'Moderate' : 'High'}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Geomagnetic (Kp)</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.solarData.geomagneticIndex.toFixed(1)}
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-1.5 mt-1">
+                      <div 
+                        className={`h-full rounded-full ${
+                          downlinkPrediction.solarData.geomagneticIndex < 3 ? 'bg-green-400' :
+                          downlinkPrediction.solarData.geomagneticIndex < 6 ? 'bg-yellow-400' :
+                          'bg-red-400'
+                        }`}
+                        style={{ width: `${(downlinkPrediction.solarData.geomagneticIndex / 9) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">Solar Wind</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.solarData.solarWindSpeed.toFixed(0)} km/s
+                    </div>
+                    <div className={`text-xs ${
+                      downlinkPrediction.solarData.solarWindSpeed < 400 ? 'text-green-400' :
+                      downlinkPrediction.solarData.solarWindSpeed < 600 ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {downlinkPrediction.solarData.solarWindSpeed < 400 ? 'Calm' :
+                       downlinkPrediction.solarData.solarWindSpeed < 600 ? 'Elevated' : 'Storm'}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded">
+                    <div className="text-gray-500 mb-1">X-Ray Flux</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.solarData.xRayFlux}
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {downlinkPrediction.solarData.xRayFlux.startsWith('B') ? 'Background' :
+                       downlinkPrediction.solarData.xRayFlux.startsWith('C') ? 'Minor' :
+                       downlinkPrediction.solarData.xRayFlux.startsWith('M') ? 'Moderate' : 'Major'}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-default-50 rounded col-span-2">
+                    <div className="text-gray-500 mb-1">Proton Flux</div>
+                    <div className="font-bold text-lg">
+                      {downlinkPrediction.solarData.protonFlux.toFixed(1)} p/cm²/s/sr
+                    </div>
+                    <div className={`text-xs ${
+                      downlinkPrediction.solarData.protonFlux < 10 ? 'text-green-400' :
+                      downlinkPrediction.solarData.protonFlux < 100 ? 'text-yellow-400' :
+                      'text-red-400'
+                    }`}>
+                      {downlinkPrediction.solarData.protonFlux < 10 ? 'Normal' :
+                       downlinkPrediction.solarData.protonFlux < 100 ? 'Elevated' : 'Event in progress'}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 p-2 bg-orange-500/10 rounded text-xs text-orange-300">
+                  ☀️ Solar activity affects lower frequency bands (L, S, C) more than higher frequencies (Ka, Ku, X).
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Optimal Transmission Windows */}
+            <Card className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30">
+              <CardHeader className="font-semibold flex items-center gap-2">
+                <span className="text-xl">⏰</span>
+                <span>Transmission Window Forecast</span>
+                <Chip size="sm" variant="flat" color="success">
+                  Next 6 Hours
+                </Chip>
+              </CardHeader>
+              <CardBody className="space-y-3">
+                <div className="text-xs text-gray-400 mb-2">
+                  Predicted optimal time windows for data transmission based on forecasted conditions
+                </div>
+                
+                {/* Generate simulated forecast windows */}
+                {[0, 2, 4].map((hoursAhead) => {
+                  const futureTime = new Date(Date.now() + hoursAhead * 60 * 60 * 1000);
+                  const timeString = futureTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  
+                  // Simulate conditions improving/degrading over time
+                  const qualityScore = 0.6 + (Math.random() * 0.3);
+                  const estimatedRate = downlinkPrediction.baseDataRate * qualityScore;
+                  
+                  return (
+                    <div key={hoursAhead} className="p-3 bg-default-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <div className="font-bold">{timeString}</div>
+                          <div className="text-xs text-gray-500">
+                            {hoursAhead === 0 ? 'Now' : `+${hoursAhead}h`}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold text-green-400">
+                            {formatDataRate(estimatedRate)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {(qualityScore * 100).toFixed(0)}% efficiency
+                          </div>
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all ${
+                            qualityScore > 0.8 ? 'bg-green-400' :
+                            qualityScore > 0.65 ? 'bg-yellow-400' :
+                            'bg-orange-400'
+                          }`}
+                          style={{ width: `${qualityScore * 100}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex gap-2 text-xs">
+                        <Chip size="sm" variant="flat" color={qualityScore > 0.8 ? 'success' : qualityScore > 0.65 ? 'warning' : 'default'}>
+                          {qualityScore > 0.8 ? '✅ Optimal' : qualityScore > 0.65 ? '⚠️ Good' : '❌ Fair'}
+                        </Chip>
+                        {hoursAhead === 0 && qualityScore > 0.75 && (
+                          <Chip size="sm" variant="flat" color="success">
+                            🚀 Recommended Now
+                          </Chip>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                <div className="p-3 bg-green-500/10 rounded-lg text-xs">
+                  <div className="font-semibold mb-1">💡 Recommendation</div>
+                  <p className="text-green-300">
+                    Based on current forecasts, the best transmission window is expected 
+                    {downlinkPrediction.certaintyFactor > 0.7 ? ' now' : ' in approximately 2 hours'} 
+                    when atmospheric conditions are most favorable.
+                  </p>
+                </div>
+              </CardBody>
+            </Card>
+
+            {/* Recommendations */}
+            {downlinkPrediction.recommendations.length > 0 && (
+              <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <div className="text-sm font-semibold mb-2">💡 Recommendations</div>
+                <ul className="space-y-1">
+                  {downlinkPrediction.recommendations.map((rec, idx) => (
+                    <li key={idx} className="text-xs text-gray-300">
+                      {rec}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Quick Band Comparison */}
+            <Button
+              size="sm"
+              variant="flat"
+              color="secondary"
+              fullWidth
+              onPress={() => {
+                const optimal = getOptimalFrequencyBand(
+                  45 + Math.random() * 30,
+                  getCurrentSolarActivity(),
+                  getCurrentWeather(selectedGroundStation.location.lat, selectedGroundStation.location.lon),
+                  selectedGroundStation.location.lat,
+                  selectedGroundStation.location.lon
+                );
+                setSelectedFrequencyBand(optimal.band);
+                alert(`Recommended: ${optimal.band}\nProjected Rate: ${formatDataRate(optimal.prediction.adjustedDataRate)}\nCertainty: ${(optimal.prediction.certaintyFactor * 100).toFixed(1)}%`);
+              }}
+            >
+              🔍 Find Optimal Frequency Band
+            </Button>
+          </CardBody>
+        </Card>
+      )}
       
       {/* Time Selection */}
       <Card>
