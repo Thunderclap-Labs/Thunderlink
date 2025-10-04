@@ -107,10 +107,13 @@ export default function EarthScene() {
     camera.position.z = 8;
     cameraRef.current = camera;
 
-    // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Renderer setup with performance optimizations
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      powerPreference: "high-performance", // Request high-performance GPU
+    });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio to 2 for better performance
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -122,8 +125,8 @@ export default function EarthScene() {
     directionalLight.position.set(5, 3, 5);
     scene.add(directionalLight);
 
-    // Create Earth with texture
-    const earthGeometry = new THREE.SphereGeometry(2, 64, 64);
+    // Create Earth with texture - reduced geometry for better performance
+    const earthGeometry = new THREE.SphereGeometry(2, 48, 48); // Reduced from 64 to 48
     
     // Load Earth texture
     const textureLoader = new THREE.TextureLoader();
@@ -139,8 +142,8 @@ export default function EarthScene() {
     scene.add(earth);
     earthRef.current = earth;
 
-    // Add enhanced atmosphere glow with multiple layers
-    const atmosphereGeometry = new THREE.SphereGeometry(2.08, 64, 64);
+    // Add enhanced atmosphere glow with multiple layers - reduced geometry for performance
+    const atmosphereGeometry = new THREE.SphereGeometry(2.08, 32, 32); // Reduced from 64 to 32
     const atmosphereMaterial = new THREE.MeshBasicMaterial({
       color: 0x4499ff,
       transparent: true,
@@ -152,7 +155,7 @@ export default function EarthScene() {
     scene.add(atmosphere);
     
     // Add outer glow layer
-    const outerGlowGeometry = new THREE.SphereGeometry(2.15, 64, 64);
+    const outerGlowGeometry = new THREE.SphereGeometry(2.15, 32, 32); // Reduced from 64 to 32
     const outerGlowMaterial = new THREE.MeshBasicMaterial({
       color: 0x2266ff,
       transparent: true,
@@ -163,13 +166,13 @@ export default function EarthScene() {
     const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
     scene.add(outerGlow);
 
-    // Create enhanced stars background
+    // Create enhanced stars background with reduced count for better performance
     const starsGeometry = new THREE.BufferGeometry();
     const starsVertices = [];
     const starsSizes = [];
     const starsColors = [];
     
-    for (let i = 0; i < 10000; i++) {
+    for (let i = 0; i < 3000; i++) { // Reduced from 10000 to 3000 for better performance
       const x = (Math.random() - 0.5) * 200;
       const y = (Math.random() - 0.5) * 200;
       const z = (Math.random() - 0.5) * 200;
@@ -206,9 +209,9 @@ export default function EarthScene() {
     scene.add(stars);
     starsRef.current = stars;
 
-    // Satellites group
+    // Satellites group - make it a child of Earth so satellites rotate with the globe for connection calculations
     const satellitesGroup = new THREE.Group();
-    scene.add(satellitesGroup);
+    scene.add(satellitesGroup); // Keep satellites in world space for easier position calculations
     satellitesRef.current = satellitesGroup;
 
     // Ground stations group - make it a child of Earth so it rotates with the globe
@@ -216,8 +219,9 @@ export default function EarthScene() {
     earth.add(groundStationsGroup); // Changed from scene.add to earth.add
     groundStationsRef.current = groundStationsGroup;
 
-    // Connection lines group
+    // Connection lines group - keep in world space and update positions each frame
     const connectionLinesGroup = new THREE.Group();
+    connectionLinesGroup.visible = showConnections; // Initialize based on state
     scene.add(connectionLinesGroup);
     connectionLinesRef.current = connectionLinesGroup;
 
@@ -313,32 +317,73 @@ export default function EarthScene() {
     setGroundStations(allGroundStations);
 
     // Animation loop with real-time satellite updates
+    // Connection lines disabled - not drawing any connections
+    const connectionLinePool: THREE.Line[] = [];
+    const MAX_CONNECTION_LINES = 0; // Disabled - set to 0 to prevent any connection lines
+    
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       
-      // Update satellite positions every frame for real-time tracking
+      // Update satellite positions and connections
       const now = Date.now();
-      if (now - lastUpdateTimeRef.current > 1000) { // Update every second
+      if (now - lastUpdateTimeRef.current > 2000) { // Update every 2 seconds for better performance
         lastUpdateTimeRef.current = now;
         updateSatellitePositions();
+      } else {
+        // Update connection line endpoints every frame to follow ground stations as Earth rotates
+        updateConnectionLines();
       }
       
       renderer.render(scene, camera);
     };
     
+    // Update connection line positions to match ground station world positions
+    const updateConnectionLines = () => {
+      if (!connectionLinesRef.current || !earthRef.current) return;
+      
+      // Update Earth's world matrix
+      earthRef.current.updateMatrixWorld(true);
+      
+      // Update each visible connection line
+      connectionLinePool.forEach((line, index) => {
+        if (!line.visible) return;
+        
+        // The satellite position is stored in positions[0-2]
+        // The ground station position needs to be updated from world coordinates
+        const positions = line.geometry.attributes.position.array as Float32Array;
+        
+        // Get the stored ground station reference (we'll need to add this)
+        const gsId = line.userData.groundStationId;
+        if (gsId) {
+          const gsData = groundStationMeshesRef.current.get(gsId);
+          if (gsData) {
+            const gsWorldPosition = new THREE.Vector3();
+            gsData.mesh.getWorldPosition(gsWorldPosition);
+            
+            // Update ground station endpoint
+            positions[3] = gsWorldPosition.x;
+            positions[4] = gsWorldPosition.y;
+            positions[5] = gsWorldPosition.z;
+            line.geometry.attributes.position.needsUpdate = true;
+          }
+        }
+      });
+    };
+    
     const updateSatellitePositions = () => {
-      if (!satellitesRef.current || satelliteDataRef.current.length === 0) return;
+      if (!satellitesRef.current || satelliteDataRef.current.length === 0 || !earthRef.current) return;
       
       const currentDate = new Date();
       let connections = 0;
-      const MAX_CONNECTION_LINES = 15; // Limit total connection lines for performance
       
-      // Clear existing connection lines
-      if (connectionLinesRef.current) {
-        while (connectionLinesRef.current.children.length > 0) {
-          connectionLinesRef.current.remove(connectionLinesRef.current.children[0]);
-        }
-      }
+      // Hide all connection lines first
+      connectionLinePool.forEach(line => {
+        line.visible = false;
+        line.userData.groundStationId = null;
+      });
+      
+      // Force update world matrices before calculating positions
+      earthRef.current.updateMatrixWorld(true);
       
       satelliteDataRef.current.forEach((sat) => {
         if (!sat.satrec) return;
@@ -353,32 +398,35 @@ export default function EarthScene() {
           // Only draw connection lines if we haven't hit the limit
           if (connections < MAX_CONNECTION_LINES && showConnections) {
             // Check connections to ground stations
-            groundStationMeshesRef.current.forEach((gs) => {
+            groundStationMeshesRef.current.forEach((gs, gsId) => {
               if (connections >= MAX_CONNECTION_LINES) return;
               
-              // Get the world position of the ground station (accounting for Earth's rotation)
+              // Get the world position of the ground station
               const gsWorldPosition = new THREE.Vector3();
               gs.mesh.getWorldPosition(gsWorldPosition);
               
+              // Check if satellite is in range using world positions
               if (isSatelliteInRange(position, gsWorldPosition, 10)) {
-                connections++;
-                
-                // Draw connection line using world position
-                if (connectionLinesRef.current) {
-                  const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(position.x, position.y, position.z),
-                    gsWorldPosition,
-                  ]);
-                  const lineMaterial = new THREE.LineBasicMaterial({
-                    color: 0x00ffff,
-                    transparent: true,
-                    opacity: 0.4,
-                    linewidth: 2,
-                    depthTest: true,
-                    depthWrite: false,
-                  });
-                  const line = new THREE.Line(lineGeometry, lineMaterial);
-                  connectionLinesRef.current.add(line);
+                // Reuse existing line from pool
+                const line = connectionLinePool[connections];
+                if (line) {
+                  // Update line geometry with world positions
+                  const positions = line.geometry.attributes.position.array as Float32Array;
+                  // Satellite position (world space)
+                  positions[0] = position.x;
+                  positions[1] = position.y;
+                  positions[2] = position.z;
+                  // Ground station position (world space)
+                  positions[3] = gsWorldPosition.x;
+                  positions[4] = gsWorldPosition.y;
+                  positions[5] = gsWorldPosition.z;
+                  line.geometry.attributes.position.needsUpdate = true;
+                  line.visible = true;
+                  
+                  // Store ground station ID for continuous updates
+                  line.userData.groundStationId = gsId;
+                  
+                  connections++;
                 }
               }
             });
@@ -558,22 +606,46 @@ export default function EarthScene() {
 
       if (intersects.length > 0) {
         const satelliteMesh = intersects[0].object;
-        const satData = satellites.find(s => s.name === satelliteMesh.userData.name);
+        const satData = satelliteDataRef.current.find(s => s.name === satelliteMesh.userData.name);
         
         if (satData) {
           const info = getSatelliteInfo(satData);
           if (info) {
             setSelectedSatellite(info);
             setIsModalOpen(true);
+            console.log('Satellite clicked:', info.name, 'Modal should open');
+          } else {
+            console.log('No satellite info available');
           }
+        } else {
+          console.log('Satellite data not found for:', satelliteMesh.userData.name);
         }
+      } else {
+        console.log('No satellite intersected');
       }
+    };
+
+    // Mouse wheel zoom
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!cameraRef.current) return;
+      
+      const zoomSpeed = 0.5;
+      const minZoom = 3; // Minimum distance (closer)
+      const maxZoom = 20; // Maximum distance (farther)
+      
+      // Update camera z position based on wheel delta
+      cameraRef.current.position.z += e.deltaY * 0.01 * zoomSpeed;
+      
+      // Clamp the zoom within bounds
+      cameraRef.current.position.z = Math.max(minZoom, Math.min(maxZoom, cameraRef.current.position.z));
     };
 
     renderer.domElement.addEventListener('mousedown', handleMouseDown);
     renderer.domElement.addEventListener('mousemove', handleMouseMove);
     renderer.domElement.addEventListener('mouseup', handleMouseUp);
     renderer.domElement.addEventListener('click', handleClick);
+    renderer.domElement.addEventListener('wheel', handleWheel, { passive: false });
     renderer.domElement.style.cursor = 'grab';
 
     // Cleanup
@@ -583,6 +655,7 @@ export default function EarthScene() {
       renderer.domElement.removeEventListener('mousemove', handleMouseMove);
       renderer.domElement.removeEventListener('mouseup', handleMouseUp);
       renderer.domElement.removeEventListener('click', handleClick);
+      renderer.domElement.removeEventListener('wheel', handleWheel);
       
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
@@ -786,6 +859,10 @@ export default function EarthScene() {
                 setShowSatellites(newVisibility);
                 if (satellitesRef.current) {
                   satellitesRef.current.visible = newVisibility;
+                  // Also set visibility on all children
+                  satellitesRef.current.traverse((child) => {
+                    child.visible = newVisibility;
+                  });
                 }
               }}
               fullWidth
@@ -802,6 +879,10 @@ export default function EarthScene() {
                 setShowGroundStations(newVisibility);
                 if (groundStationsRef.current) {
                   groundStationsRef.current.visible = newVisibility;
+                  // Also set visibility on all children
+                  groundStationsRef.current.traverse((child) => {
+                    child.visible = newVisibility;
+                  });
                 }
               }}
               fullWidth
@@ -811,7 +892,16 @@ export default function EarthScene() {
             <Button 
               size="sm" 
               color={showConnections ? 'primary' : 'default'}
-              onPress={() => setShowConnections(!showConnections)}
+              onPress={() => {
+                const newVisibility = !showConnections;
+                setShowConnections(newVisibility);
+                if (connectionLinesRef.current) {
+                  connectionLinesRef.current.visible = newVisibility;
+                  connectionLinesRef.current.traverse((child) => {
+                    child.visible = newVisibility;
+                  });
+                }
+              }}
               fullWidth
             >
               {showConnections ? 'Hide' : 'Show'} Links
