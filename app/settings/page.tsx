@@ -1,6 +1,6 @@
 'use client';
 
-import { title } from '@/config/site';
+import { title } from '@/components/primitives';
 import { useSettingsStore } from '@/store/settingsStore';
 import { Card, CardBody, CardHeader } from '@heroui/card';
 import { Select, SelectItem } from '@heroui/select';
@@ -71,7 +71,7 @@ export default function SettingsPage() {
                 }}
               >
                 {countries.map((country) => (
-                  <SelectItem key={country.key} value={country.key}>
+                  <SelectItem key={country.key}>
                     {country.label}
                   </SelectItem>
                 ))}
@@ -92,7 +92,7 @@ export default function SettingsPage() {
                 isDisabled
               >
                 {timezones.map((tz) => (
-                  <SelectItem key={tz.key} value={tz.key}>
+                  <SelectItem key={tz.key}>
                     {tz.label}
                   </SelectItem>
                 ))}

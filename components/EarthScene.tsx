@@ -375,10 +375,7 @@ export default function EarthScene() {
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       
-      // Smooth Earth rotation for visual appeal
-      if (earthRef.current) {
-        earthRef.current.rotation.y += 0.0005;
-      }
+      // Earth rotation removed - user can rotate manually with mouse
       
       // Add subtle star field rotation for depth
       if (starsRef.current) {
@@ -1657,11 +1654,14 @@ interface BookingSelectorProps {
 }
 
 function BookingSatelliteSelector({ satellites, groundStations, selectedGroundStation, accessibleSatellites = [], onClose }: BookingSelectorProps) {
-  const { addBooking } = useBookingStore();
+  const { addBooking, placeBid, getAuctionBids } = useBookingStore();
   const [selectedSatellite, setSelectedSatellite] = useState<string>('');
   const [duration, setDuration] = useState<number>(30);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [purpose, setPurpose] = useState<string>('');
+  const [bookingType, setBookingType] = useState<'instant' | 'auction'>('instant');
+  const [bidAmount, setBidAmount] = useState<number>(0);
+  const [auctionDuration, setAuctionDuration] = useState<number>(24); // hours
   
   // Calculate price based on satellite type and duration
   const calculatePrice = (satName: string, durationMinutes: number): number => {
@@ -1684,6 +1684,7 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
   };
   
   const price = selectedSatellite ? calculatePrice(selectedSatellite, duration) : 0;
+  const minimumBid = Math.floor(price * 0.8); // Auction starts at 80% of instant price
   
   const handleBooking = () => {
     if (!selectedSatellite || !startTime || !purpose) {
@@ -1703,22 +1704,48 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
       .slice(0, 3)
       .map((gs: { status: string; id: string }) => gs.id);
     
-    const booking: SatelliteBooking = {
-      id: `booking-${Date.now()}`,
-      satelliteName: satellite.name,
-      satelliteId: satellite.tleLine1.substring(2, 7).trim(),
-      startTime: start,
-      endTime: end,
-      duration,
-      price,
-      status: 'pending',
-      groundStations: availableStations,
-      dataRate: '100 Mbps',
-      purpose,
-    };
-    
-    addBooking(booking);
-    alert(`Booking confirmed! Total: $${price.toLocaleString()}`);
+    if (bookingType === 'auction') {
+      // Create auction booking
+      const auctionEnd = new Date(Date.now() + auctionDuration * 60 * 60 * 1000);
+      const booking: SatelliteBooking = {
+        id: `booking-${Date.now()}`,
+        satelliteName: satellite.name,
+        satelliteId: satellite.tleLine1.substring(2, 7).trim(),
+        startTime: start,
+        endTime: end,
+        duration,
+        price: minimumBid,
+        status: 'pending',
+        groundStations: availableStations,
+        dataRate: '100 Mbps',
+        purpose,
+        isAuction: true,
+        currentHighBid: minimumBid,
+        auctionEndTime: auctionEnd,
+      };
+      
+      addBooking(booking);
+      alert(`Auction created! Minimum bid: $${minimumBid.toLocaleString()}\nAuction ends in ${auctionDuration} hours.`);
+    } else {
+      // Instant booking
+      const booking: SatelliteBooking = {
+        id: `booking-${Date.now()}`,
+        satelliteName: satellite.name,
+        satelliteId: satellite.tleLine1.substring(2, 7).trim(),
+        startTime: start,
+        endTime: end,
+        duration,
+        price,
+        status: 'pending',
+        groundStations: availableStations,
+        dataRate: '100 Mbps',
+        purpose,
+        isAuction: false,
+      };
+      
+      addBooking(booking);
+      alert(`Booking confirmed! Total: $${price.toLocaleString()}`);
+    }
     onClose();
   };
   
@@ -1854,6 +1881,125 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
         </CardBody>
       </Card>
       
+      {/* Booking Type Selection */}
+      <Card className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/30">
+        <CardHeader className="font-semibold">💰 Booking Method</CardHeader>
+        <CardBody className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Card 
+              isPressable
+              onPress={() => setBookingType('instant')}
+              className={`cursor-pointer transition-all ${
+                bookingType === 'instant' 
+                  ? 'bg-primary/20 border-2 border-primary' 
+                  : 'bg-default-100 border-2 border-transparent'
+              }`}
+            >
+              <CardBody className="text-center py-4">
+                <div className="text-2xl mb-2">⚡</div>
+                <div className="font-bold">Instant Booking</div>
+                <div className="text-xs text-gray-500 mt-1">Pay now, book immediately</div>
+                {selectedSatellite && (
+                  <div className="text-lg font-bold text-primary mt-2">
+                    ${price.toLocaleString()}
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+            
+            <Card 
+              isPressable
+              onPress={() => setBookingType('auction')}
+              className={`cursor-pointer transition-all ${
+                bookingType === 'auction' 
+                  ? 'bg-secondary/20 border-2 border-secondary' 
+                  : 'bg-default-100 border-2 border-transparent'
+              }`}
+            >
+              <CardBody className="text-center py-4">
+                <div className="text-2xl mb-2">🔨</div>
+                <div className="font-bold">Auction</div>
+                <div className="text-xs text-gray-500 mt-1">Bid for the best price</div>
+                {selectedSatellite && (
+                  <div className="text-lg font-bold text-secondary mt-2">
+                    ${minimumBid.toLocaleString()}+
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+          </div>
+          
+          {bookingType === 'auction' && selectedSatellite && (
+            <div className="space-y-3 animate-fade-in">
+              <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <h4 className="font-semibold mb-2 text-sm">🔨 How Auctions Work</h4>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Set your maximum bid amount</li>
+                  <li>• System automatically bids for you up to your max</li>
+                  <li>• You're notified if outbid</li>
+                  <li>• Winner pays their final bid amount</li>
+                  <li>• Save up to 50% vs instant booking!</li>
+                </ul>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Auction Duration: {auctionDuration} hours
+                </label>
+                <Slider
+                  step={6}
+                  minValue={6}
+                  maxValue={72}
+                  value={auctionDuration}
+                  onChange={(value: number | number[]) => setAuctionDuration(value as number)}
+                  className="max-w-full"
+                  color="secondary"
+                  marks={[
+                    { value: 6, label: '6h' },
+                    { value: 24, label: '24h' },
+                    { value: 48, label: '48h' },
+                    { value: 72, label: '72h' },
+                  ]}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="p-3 bg-green-500/10 rounded-lg">
+                  <div className="text-gray-400">Minimum Bid</div>
+                  <div className="font-bold text-green-400">${minimumBid.toLocaleString()}</div>
+                  <div className="text-xs text-gray-500">Starting price</div>
+                </div>
+                <div className="p-3 bg-blue-500/10 rounded-lg">
+                  <div className="text-gray-400">Instant Price</div>
+                  <div className="font-bold text-blue-400">${price.toLocaleString()}</div>
+                  <div className="text-xs text-gray-500">Skip the wait</div>
+                </div>
+              </div>
+              
+              <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                <div className="text-sm font-semibold mb-1">💡 Pro Tip</div>
+                <p className="text-xs text-gray-400">
+                  Auctions ending at off-peak hours typically have lower winning bids. 
+                  Consider scheduling your auction to end at night or early morning!
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {bookingType === 'instant' && selectedSatellite && (
+            <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg animate-fade-in">
+              <h4 className="font-semibold mb-1 text-sm">⚡ Instant Booking Benefits</h4>
+              <ul className="text-xs text-gray-400 space-y-1">
+                <li>• Immediate confirmation</li>
+                <li>• Guaranteed time slot</li>
+                <li>• No waiting for auction to end</li>
+                <li>• Perfect for urgent missions</li>
+              </ul>
+            </div>
+          )}
+        </CardBody>
+      </Card>
+      
       {/* Features & Network Info */}
       <Card>
         <CardHeader className="font-semibold">Network Features</CardHeader>
@@ -1887,8 +2033,10 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
       
       {/* Price Summary */}
       {selectedSatellite && (
-        <Card>
-          <CardHeader className="font-semibold">Price Summary</CardHeader>
+        <Card className={bookingType === 'auction' ? 'border-2 border-secondary' : 'border-2 border-primary'}>
+          <CardHeader className="font-semibold flex items-center gap-2">
+            {bookingType === 'auction' ? '🔨 Auction Summary' : '💳 Price Summary'}
+          </CardHeader>
           <CardBody>
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
@@ -1903,22 +2051,63 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
                 <span>Network Access:</span>
                 <span>Included</span>
               </div>
-              <div className="border-t border-gray-600 pt-2 mt-2"></div>
-              <div className="flex justify-between text-lg font-bold">
-                <span>Total:</span>
-                <span className="text-green-400">${price.toLocaleString()}</span>
-              </div>
+              {bookingType === 'auction' && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span>Auction Duration:</span>
+                    <span>{auctionDuration} hours</span>
+                  </div>
+                  <div className="border-t border-gray-600 pt-2 mt-2"></div>
+                  <div className="flex justify-between text-sm text-gray-400">
+                    <span>Instant Price:</span>
+                    <span className="line-through">${price.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold">
+                    <span>Starting Bid:</span>
+                    <span className="text-secondary">${minimumBid.toLocaleString()}</span>
+                  </div>
+                  <div className="p-3 bg-green-500/10 rounded-lg mt-2">
+                    <div className="text-sm font-semibold text-green-400">
+                      Potential Savings: ${(price - minimumBid).toLocaleString()} ({Math.round(((price - minimumBid) / price) * 100)}%)
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      Average winning bid is {Math.round(minimumBid / price * 100 + 10)}% of instant price
+                    </div>
+                  </div>
+                </>
+              )}
+              {bookingType === 'instant' && (
+                <>
+                  <div className="border-t border-gray-600 pt-2 mt-2"></div>
+                  <div className="flex justify-between text-lg font-bold">
+                    <span>Total:</span>
+                    <span className="text-green-400">${price.toLocaleString()}</span>
+                  </div>
+                </>
+              )}
             </div>
             <Button 
-              color="primary" 
+              color={bookingType === 'auction' ? 'secondary' : 'primary'}
               size="lg"
               fullWidth
               className="mt-4"
               onPress={handleBooking}
               isDisabled={!selectedSatellite || !startTime || !purpose}
             >
-              Confirm Booking
+              {bookingType === 'auction' ? '🔨 Create Auction' : '⚡ Confirm Instant Booking'}
             </Button>
+            {bookingType === 'instant' && (
+              <Button 
+                color="default"
+                variant="flat"
+                size="sm"
+                fullWidth
+                className="mt-2"
+                onPress={() => setBookingType('auction')}
+              >
+                Or try an auction to save up to 50%
+              </Button>
+            )}
           </CardBody>
         </Card>
       )}
