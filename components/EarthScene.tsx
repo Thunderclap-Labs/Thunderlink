@@ -75,6 +75,8 @@ export default function EarthScene() {
   const [showSatellites, setShowSatellites] = useState(true);
   const [maxSatelliteCount, setMaxSatelliteCount] = useState<number>(200);
   const [isGroundStationModalOpen, setIsGroundStationModalOpen] = useState(false);
+  const [selectedGroundStation, setSelectedGroundStation] = useState<typeof GROUND_STATIONS[0] | null>(null);
+  const [accessibleSatellites, setAccessibleSatellites] = useState<string[]>([]);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<NodeJS.Timeout | null>(null);
 
   const { setGroundStations } = useBookingStore();
@@ -85,9 +87,10 @@ export default function EarthScene() {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Scene setup
+    // Scene setup with modern dark gradient background
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000510);
+    scene.fog = new THREE.Fog(0x000510, 10, 50); // Add subtle fog for depth
     sceneRef.current = scene;
 
     // Camera setup
@@ -132,16 +135,29 @@ export default function EarthScene() {
     scene.add(earth);
     earthRef.current = earth;
 
-    // Add atmosphere glow
-    const atmosphereGeometry = new THREE.SphereGeometry(2.1, 64, 64);
+    // Add enhanced atmosphere glow with multiple layers
+    const atmosphereGeometry = new THREE.SphereGeometry(2.08, 64, 64);
     const atmosphereMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4488ff,
+      color: 0x4499ff,
       transparent: true,
-      opacity: 0.1,
+      opacity: 0.15,
       side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
     });
     const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
     scene.add(atmosphere);
+    
+    // Add outer glow layer
+    const outerGlowGeometry = new THREE.SphereGeometry(2.15, 64, 64);
+    const outerGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x2266ff,
+      transparent: true,
+      opacity: 0.08,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+    scene.add(outerGlow);
 
     // Create enhanced stars background
     const starsGeometry = new THREE.BufferGeometry();
@@ -205,12 +221,14 @@ export default function EarthScene() {
     GROUND_STATIONS.forEach((gs) => {
       const position = latLonToVector3(gs.location.lat, gs.location.lon, EARTH_RADIUS + 0.02);
       
-      // Create ground station marker (antenna tower)
-      const towerGeometry = new THREE.ConeGeometry(0.03, 0.1, 8);
-      const towerMaterial = new THREE.MeshPhongMaterial({
+      // Create ground station marker (antenna tower) with improved visuals
+      const towerGeometry = new THREE.ConeGeometry(0.04, 0.12, 8);
+      const towerMaterial = new THREE.MeshStandardMaterial({
         color: gs.status === 'online' ? 0x00ff00 : 0xff0000,
-        emissive: gs.status === 'online' ? 0x00aa00 : 0xaa0000,
-        emissiveIntensity: 0.5,
+        emissive: gs.status === 'online' ? 0x00ff00 : 0xff0000,
+        emissiveIntensity: 0.6,
+        metalness: 0.7,
+        roughness: 0.3,
       });
       const tower = new THREE.Mesh(towerGeometry, towerMaterial);
       tower.position.set(position.x, position.y, position.z);
@@ -220,11 +238,27 @@ export default function EarthScene() {
       tower.rotateX(Math.PI / 2);
       
       tower.userData.groundStation = gs;
+      tower.userData.isGroundStation = true; // Flag for easier identification
       
-      // Add base platform
-      const platformGeometry = new THREE.CylinderGeometry(0.04, 0.04, 0.01, 16);
-      const platformMaterial = new THREE.MeshPhongMaterial({
-        color: 0x444444,
+      // Add glow sprite to ground station
+      const gsGlowTexture = createCircleTexture();
+      const gsSpriteMaterial = new THREE.SpriteMaterial({
+        map: gsGlowTexture,
+        color: gs.status === 'online' ? 0x00ff00 : 0xff0000,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending,
+      });
+      const gsSprite = new THREE.Sprite(gsSpriteMaterial);
+      gsSprite.scale.set(0.2, 0.2, 1);
+      tower.add(gsSprite);
+      
+      // Add base platform with improved material
+      const platformGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.015, 16);
+      const platformMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        metalness: 0.8,
+        roughness: 0.2,
       });
       const platform = new THREE.Mesh(platformGeometry, platformMaterial);
       platform.position.set(position.x, position.y, position.z);
@@ -234,20 +268,21 @@ export default function EarthScene() {
       groundStationsGroup.add(tower);
       groundStationsGroup.add(platform);
       
-      // Add field of view cone (smaller for better visibility)
-      const fovHeight = 1.5; // Height of the cone (field of view range)
-      const fovRadius = Math.tan((30 * Math.PI) / 180) * fovHeight; // 30 degree FOV
+      // Add field of view cone with improved visuals
+      const fovHeight = 1.5;
+      const fovRadius = Math.tan((30 * Math.PI) / 180) * fovHeight;
       const fovGeometry = new THREE.ConeGeometry(fovRadius, fovHeight, 32, 1, true);
       const fovMaterial = new THREE.MeshBasicMaterial({
-        color: gs.status === 'online' ? 0x00ff00 : 0xff0000,
+        color: gs.status === 'online' ? 0x00ff88 : 0xff0000,
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.05,
         side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
       });
       const fovCone = new THREE.Mesh(fovGeometry, fovMaterial);
       fovCone.position.set(position.x, position.y, position.z);
       fovCone.lookAt(position.x * 2, position.y * 2, position.z * 2);
-      fovCone.rotateX(-Math.PI / 2); // Point outward from Earth
+      fovCone.rotateX(-Math.PI / 2);
       groundStationsGroup.add(fovCone);
       
       // Store ground station position for connection calculations
@@ -332,7 +367,8 @@ export default function EarthScene() {
                   const lineMaterial = new THREE.LineBasicMaterial({
                     color: 0x00ffff,
                     transparent: true,
-                    opacity: 0.3,
+                    opacity: 0.4,
+                    linewidth: 2,
                   });
                   const line = new THREE.Line(lineGeometry, lineMaterial);
                   connectionLinesRef.current.add(line);
@@ -407,6 +443,29 @@ export default function EarthScene() {
         // Check for satellite hover only when not dragging
         if (satellitesRef.current && cameraRef.current) {
           raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+          
+          // Check ground stations first
+          if (groundStationsRef.current) {
+            const gsChildren: THREE.Object3D[] = [];
+            groundStationsRef.current.traverse((child) => {
+              if (child.userData.isGroundStation) {
+                gsChildren.push(child);
+              }
+            });
+            
+            const gsIntersects = raycasterRef.current.intersectObjects(gsChildren, true);
+            
+            if (gsIntersects.length > 0) {
+              const hoveredStation = gsIntersects[0].object.userData.groundStation;
+              if (hoveredStation) {
+                setHoveredSatellite(hoveredStation.name);
+                document.body.style.cursor = 'pointer';
+                return;
+              }
+            }
+          }
+          
+          // Check satellites
           const satelliteMeshes = satellitesRef.current.children.filter(
             child => child.type === 'Mesh' && child.userData.name
           );
@@ -443,6 +502,46 @@ export default function EarthScene() {
       mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+      
+      // Check for ground station clicks first
+      if (groundStationsRef.current) {
+        const gsChildren: THREE.Object3D[] = [];
+        groundStationsRef.current.traverse((child) => {
+          if (child.userData.isGroundStation) {
+            gsChildren.push(child);
+          }
+        });
+        
+        const gsIntersects = raycasterRef.current.intersectObjects(gsChildren, true);
+        
+        if (gsIntersects.length > 0) {
+          const clickedStation = gsIntersects[0].object.userData.groundStation;
+          if (clickedStation) {
+            setSelectedGroundStation(clickedStation);
+            
+            // Calculate which satellites are accessible from this ground station
+            const accessible: string[] = [];
+            const gsData = groundStationMeshesRef.current.get(clickedStation.id);
+            
+            if (gsData) {
+              const gsWorldPosition = new THREE.Vector3();
+              gsData.mesh.getWorldPosition(gsWorldPosition);
+              
+              satelliteDataRef.current.forEach((sat) => {
+                if (!sat.satrec) return;
+                const position = calculateSatellitePosition(sat.satrec);
+                if (position && isSatelliteInRange(position, gsWorldPosition, 10)) {
+                  accessible.push(sat.name);
+                }
+              });
+            }
+            
+            setAccessibleSatellites(accessible);
+            setIsBookingModalOpen(true);
+            return;
+          }
+        }
+      }
       
       // Only check satellite meshes, not trails
       const satelliteMeshes = satellitesRef.current.children.filter(
@@ -540,13 +639,30 @@ export default function EarthScene() {
       const position = calculateSatellitePosition(sat.satrec);
       if (!position) return;
 
-      // Create satellite mesh - larger for easier clicking
-      const satelliteGeometry = new THREE.SphereGeometry(0.04, 12, 12);
-      const satelliteMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff4444,
+      // Create satellite mesh - smaller with glow effect for modern look
+      const satelliteGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+      const satelliteMaterial = new THREE.MeshStandardMaterial({
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+        emissiveIntensity: 0.8,
+        metalness: 0.5,
+        roughness: 0.2,
       });
 
       const satelliteMesh = new THREE.Mesh(satelliteGeometry, satelliteMaterial);
+      
+      // Add glow effect with sprite
+      const glowTexture = createCircleTexture();
+      const spriteMaterial = new THREE.SpriteMaterial({
+        map: glowTexture,
+        color: 0x00ffff,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.scale.set(0.15, 0.15, 1);
+      satelliteMesh.add(sprite);
       satelliteMesh.position.set(position.x, position.y, position.z);
       satelliteMesh.userData.name = sat.name;
       
@@ -568,9 +684,10 @@ export default function EarthScene() {
 
       trailGeometry.setAttribute('position', new THREE.Float32BufferAttribute(trailPoints, 3));
       const trailMaterial = new THREE.LineBasicMaterial({
-        color: 0xff4444,
-        opacity: 0.3,
+        color: 0x00ffff,
+        opacity: 0.2,
         transparent: true,
+        linewidth: 1,
       });
       const trail = new THREE.Line(trailGeometry, trailMaterial);
 
@@ -695,7 +812,7 @@ export default function EarthScene() {
           </div>
         </div>
         <p className="text-xs text-gray-400 mt-3">
-          Drag to rotate • Click satellite for info
+          Drag to rotate • Click satellite for info • Click station to book
         </p>
       </div>
 
@@ -879,7 +996,11 @@ export default function EarthScene() {
       {/* Booking Modal */}
       <Modal 
         isOpen={isBookingModalOpen} 
-        onClose={() => setIsBookingModalOpen(false)}
+        onClose={() => {
+          setIsBookingModalOpen(false);
+          setSelectedGroundStation(null);
+          setAccessibleSatellites([]);
+        }}
         size="2xl"
         backdrop="blur"
         scrollBehavior="inside"
@@ -889,12 +1010,25 @@ export default function EarthScene() {
             <>
               <ModalHeader className="flex flex-col gap-1">
                 <h2 className="text-2xl font-bold">Book Satellite Time</h2>
-                <p className="text-sm text-gray-500">Select a satellite and time slot to get started</p>
+                {selectedGroundStation ? (
+                  <div className="flex items-center gap-2">
+                    <Chip color="success" size="sm" variant="flat">
+                      📡 {selectedGroundStation.name}
+                    </Chip>
+                    <p className="text-sm text-gray-500">
+                      {accessibleSatellites.length} satellites currently accessible
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Select a satellite and time slot to get started</p>
+                )}
               </ModalHeader>
               <ModalBody>
                 <BookingSatelliteSelector 
                   satellites={satellites}
                   groundStations={GROUND_STATIONS}
+                  selectedGroundStation={selectedGroundStation}
+                  accessibleSatellites={accessibleSatellites}
                   onClose={onClose}
                 />
               </ModalBody>
@@ -936,10 +1070,12 @@ export default function EarthScene() {
 interface BookingSelectorProps {
   satellites: SatelliteData[];
   groundStations: typeof GROUND_STATIONS;
+  selectedGroundStation?: typeof GROUND_STATIONS[0] | null;
+  accessibleSatellites?: string[];
   onClose: () => void;
 }
 
-function BookingSatelliteSelector({ satellites, groundStations, onClose }: BookingSelectorProps) {
+function BookingSatelliteSelector({ satellites, groundStations, selectedGroundStation, accessibleSatellites = [], onClose }: BookingSelectorProps) {
   const { addBooking } = useBookingStore();
   const [selectedSatellite, setSelectedSatellite] = useState<string>('');
   const [duration, setDuration] = useState<number>(30);
@@ -1007,6 +1143,56 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
   
   return (
     <div className="space-y-6">
+      {/* Selected Ground Station Info */}
+      {selectedGroundStation && accessibleSatellites.length > 0 && (
+        <Card className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30">
+          <CardHeader className="font-semibold flex items-center gap-2">
+            <span className="text-xl">📡</span>
+            {selectedGroundStation.name}
+          </CardHeader>
+          <CardBody className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="text-gray-400">Location</div>
+                <div className="font-bold">{selectedGroundStation.location.city}, {selectedGroundStation.location.country}</div>
+              </div>
+              <div>
+                <div className="text-gray-400">Status</div>
+                <Chip size="sm" color="success" variant="flat">
+                  {selectedGroundStation.status}
+                </Chip>
+              </div>
+              <div>
+                <div className="text-gray-400">Antenna</div>
+                <div className="font-bold text-sm">{selectedGroundStation.antennaType}</div>
+              </div>
+              <div>
+                <div className="text-gray-400">Frequency</div>
+                <div className="font-bold text-sm">{selectedGroundStation.frequency}</div>
+              </div>
+            </div>
+            <div className="pt-3 border-t border-green-500/30">
+              <div className="text-sm text-gray-400 mb-2">Currently Accessible Satellites:</div>
+              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                {accessibleSatellites.slice(0, 15).map((satName) => (
+                  <Chip key={satName} size="sm" color="primary" variant="flat">
+                    {satName}
+                  </Chip>
+                ))}
+                {accessibleSatellites.length > 15 && (
+                  <Chip size="sm" color="default" variant="flat">
+                    +{accessibleSatellites.length - 15} more
+                  </Chip>
+                )}
+              </div>
+              <p className="text-xs text-green-300 mt-2">
+                ✨ These satellites are currently in range and available for immediate booking
+              </p>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+      
       {/* Satellite Selection */}
       <Card>
         <CardHeader className="font-semibold">Select Satellite</CardHeader>
@@ -1293,20 +1479,20 @@ function GroundStationManager({ defaultStations, onClose }: GroundStationManager
                 selectedKeys={[newStation.antennaType]}
                 onChange={(e) => setNewStation({ ...newStation, antennaType: e.target.value })}
               >
-                <SelectItem key="Parabolic 10m" value="Parabolic 10m">Parabolic 10m</SelectItem>
-                <SelectItem key="Parabolic 12m" value="Parabolic 12m">Parabolic 12m</SelectItem>
-                <SelectItem key="Parabolic 15m" value="Parabolic 15m">Parabolic 15m</SelectItem>
-                <SelectItem key="Phased Array" value="Phased Array">Phased Array</SelectItem>
+                <SelectItem key="Parabolic 10m">Parabolic 10m</SelectItem>
+                <SelectItem key="Parabolic 12m">Parabolic 12m</SelectItem>
+                <SelectItem key="Parabolic 15m">Parabolic 15m</SelectItem>
+                <SelectItem key="Phased Array">Phased Array</SelectItem>
               </Select>
               <Select
                 label="Frequency Band"
                 selectedKeys={[newStation.frequency]}
                 onChange={(e) => setNewStation({ ...newStation, frequency: e.target.value })}
               >
-                <SelectItem key="Ka-band" value="Ka-band">Ka-band</SelectItem>
-                <SelectItem key="Ku-band" value="Ku-band">Ku-band</SelectItem>
-                <SelectItem key="C-band" value="C-band">C-band</SelectItem>
-                <SelectItem key="X-band" value="X-band">X-band</SelectItem>
+                <SelectItem key="Ka-band">Ka-band</SelectItem>
+                <SelectItem key="Ku-band">Ku-band</SelectItem>
+                <SelectItem key="C-band">C-band</SelectItem>
+                <SelectItem key="X-band">X-band</SelectItem>
               </Select>
             </div>
             <Input
