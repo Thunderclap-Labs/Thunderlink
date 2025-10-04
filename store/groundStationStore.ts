@@ -14,6 +14,7 @@ export interface CustomGroundStation {
   capacity: number;
   antennaType: string;
   frequency: string;
+  rating: number;
   isCustom: boolean;
   createdAt: string;
 }
