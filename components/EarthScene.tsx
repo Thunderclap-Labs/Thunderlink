@@ -7,6 +7,10 @@ import { Button } from '@heroui/button';
 import { Card, CardBody, CardHeader } from '@heroui/card';
 import { Chip } from '@heroui/chip';
 import { Spinner } from '@heroui/spinner';
+import { Select, SelectItem } from '@heroui/select';
+import { Input } from '@heroui/input';
+import { Textarea } from '@heroui/input';
+import { Slider } from '@heroui/slider';
 import { fetchSatelliteTLEData, calculateSatellitePosition, getSatelliteInfo, SatelliteData, SatelliteInfo, GROUND_STATIONS, latLonToVector3, isSatelliteInRange } from '@/utils/satelliteUtils';
 import { useBookingStore } from '@/store/bookingStore';
 import { SatelliteBooking } from '@/types';
@@ -44,6 +48,8 @@ export default function EarthScene() {
   const [activeConnections, setActiveConnections] = useState<number>(0);
   const [showGroundStations, setShowGroundStations] = useState(true);
   const [showConnections, setShowConnections] = useState(true);
+  const [showSatellites, setShowSatellites] = useState(true);
+  const [maxSatelliteCount, setMaxSatelliteCount] = useState<number>(30);
 
   const { setGroundStations } = useBookingStore();
 
@@ -150,9 +156,9 @@ export default function EarthScene() {
     scene.add(satellitesGroup);
     satellitesRef.current = satellitesGroup;
 
-    // Ground stations group
+    // Ground stations group - make it a child of Earth so it rotates with the globe
     const groundStationsGroup = new THREE.Group();
-    scene.add(groundStationsGroup);
+    earth.add(groundStationsGroup); // Changed from scene.add to earth.add
     groundStationsRef.current = groundStationsGroup;
 
     // Connection lines group
@@ -223,6 +229,7 @@ export default function EarthScene() {
       
       const currentDate = new Date();
       let connections = 0;
+      const MAX_CONNECTION_LINES = 15; // Limit total connection lines for performance
       
       // Clear existing connection lines
       if (connectionLinesRef.current) {
@@ -241,27 +248,36 @@ export default function EarthScene() {
         if (satelliteMesh) {
           satelliteMesh.position.set(position.x, position.y, position.z);
           
-          // Check connections to ground stations
-          groundStationMeshesRef.current.forEach((gs) => {
-            if (isSatelliteInRange(position, gs.position, 10)) {
-              connections++;
+          // Only draw connection lines if we haven't hit the limit
+          if (connections < MAX_CONNECTION_LINES && showConnections) {
+            // Check connections to ground stations
+            groundStationMeshesRef.current.forEach((gs) => {
+              if (connections >= MAX_CONNECTION_LINES) return;
               
-              // Draw connection line
-              if (connectionLinesRef.current && showConnections) {
-                const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                  new THREE.Vector3(position.x, position.y, position.z),
-                  gs.position,
-                ]);
-                const lineMaterial = new THREE.LineBasicMaterial({
-                  color: 0x00ffff,
-                  transparent: true,
-                  opacity: 0.3,
-                });
-                const line = new THREE.Line(lineGeometry, lineMaterial);
-                connectionLinesRef.current.add(line);
+              // Get the world position of the ground station (accounting for Earth's rotation)
+              const gsWorldPosition = new THREE.Vector3();
+              gs.mesh.getWorldPosition(gsWorldPosition);
+              
+              if (isSatelliteInRange(position, gsWorldPosition, 10)) {
+                connections++;
+                
+                // Draw connection line using world position
+                if (connectionLinesRef.current) {
+                  const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(position.x, position.y, position.z),
+                    gsWorldPosition,
+                  ]);
+                  const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.3,
+                  });
+                  const line = new THREE.Line(lineGeometry, lineMaterial);
+                  connectionLinesRef.current.add(line);
+                }
               }
-            }
-          });
+            });
+          }
         }
       });
       
@@ -435,8 +451,13 @@ export default function EarthScene() {
       satellitesRef.current.remove(satellitesRef.current.children[0]);
     }
 
-    // Add satellites to scene
-    satellites.forEach((sat) => {
+    // Add satellites to scene (limit to maxSatelliteCount)
+    const satellitesToDisplay = satellites.slice(0, maxSatelliteCount);
+    
+    // Update satelliteDataRef to match displayed satellites
+    satelliteDataRef.current = satellitesToDisplay;
+    
+    satellitesToDisplay.forEach((sat) => {
       if (!sat.satrec) return;
 
       const position = calculateSatellitePosition(sat.satrec);
@@ -479,7 +500,7 @@ export default function EarthScene() {
       satellitesRef.current?.add(satelliteMesh);
       satellitesRef.current?.add(trail);
     });
-  }, [satellites]);
+  }, [satellites, maxSatelliteCount]);
 
   return (
     <div className="relative w-full h-screen">
@@ -512,7 +533,7 @@ export default function EarthScene() {
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span>Satellites:</span>
-            <span className="font-bold text-blue-400">{satellites.length}</span>
+            <span className="font-bold text-blue-400">{Math.min(satellites.length, maxSatelliteCount)}</span>
           </div>
           <div className="flex justify-between">
             <span>Ground Stations:</span>
@@ -523,7 +544,21 @@ export default function EarthScene() {
             <span className="font-bold text-cyan-400">{activeConnections}</span>
           </div>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-3">
+          {/* Satellite Count Slider */}
+          <div className="space-y-1">
+            <label className="text-xs text-gray-300">Satellite Count: {maxSatelliteCount}</label>
+            <Slider
+              size="sm"
+              step={10}
+              minValue={10}
+              maxValue={50}
+              value={maxSatelliteCount}
+              onChange={(value: number | number[]) => setMaxSatelliteCount(value as number)}
+              className="max-w-full"
+              color="primary"
+            />
+          </div>
           <Button 
             color="primary" 
             fullWidth 
@@ -532,6 +567,21 @@ export default function EarthScene() {
           >
             Book Satellite Time
           </Button>
+          <div className="flex gap-2">
+            <Button 
+              size="sm" 
+              color={showSatellites ? 'primary' : 'default'}
+              onPress={() => {
+                setShowSatellites(!showSatellites);
+                if (satellitesRef.current) {
+                  satellitesRef.current.visible = !showSatellites;
+                }
+              }}
+              fullWidth
+            >
+              {showSatellites ? 'Hide' : 'Show'} Satellites
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Button 
               size="sm" 
@@ -734,9 +784,9 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
     
     // Find available ground stations for this satellite
     const availableStations = groundStations
-      .filter(gs => gs.status === 'online')
+      .filter((gs: { status: string; id: string }) => gs.status === 'online')
       .slice(0, 3)
-      .map(gs => gs.id);
+      .map((gs: { status: string; id: string }) => gs.id);
     
     const booking: SatelliteBooking = {
       id: `booking-${Date.now()}`,
@@ -763,20 +813,21 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
       <Card>
         <CardHeader className="font-semibold">Select Satellite</CardHeader>
         <CardBody>
-          <select
-            className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600"
-            value={selectedSatellite}
-            onChange={(e) => setSelectedSatellite(e.target.value)}
-            title="Select a satellite"
-            aria-label="Select a satellite"
+          <Select
+            label="Choose a satellite"
+            placeholder="Select a satellite"
+            selectedKeys={selectedSatellite ? [selectedSatellite] : []}
+            onSelectionChange={(keys) => {
+              const selected = Array.from(keys)[0] as string;
+              setSelectedSatellite(selected);
+            }}
           >
-            <option value="">Choose a satellite...</option>
             {satellites.slice(0, 50).map((sat) => (
-              <option key={sat.name} value={sat.name}>
+              <SelectItem key={sat.name}>
                 {sat.name} - {sat.category}
-              </option>
+              </SelectItem>
             ))}
-          </select>
+          </Select>
         </CardBody>
       </Card>
       
@@ -784,30 +835,23 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
       <Card>
         <CardHeader className="font-semibold">Schedule</CardHeader>
         <CardBody className="space-y-4">
-          <div>
-            <label className="block text-sm mb-2">Start Time</label>
-            <input
-              type="datetime-local"
-              className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              min={new Date().toISOString().slice(0, 16)}
-              title="Select start time"
-              aria-label="Select start time"
-            />
-          </div>
-          <div>
-            <label className="block text-sm mb-2">Duration: {duration} minutes</label>
-            <input
-              type="range"
-              min="15"
-              max="240"
-              step="15"
+          <Input
+            type="datetime-local"
+            label="Start Time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            min={new Date().toISOString().slice(0, 16)}
+          />
+          <div className="space-y-2">
+            <label className="block text-sm">Duration: {duration} minutes</label>
+            <Slider
+              step={15}
+              minValue={15}
+              maxValue={240}
               value={duration}
-              onChange={(e) => setDuration(parseInt(e.target.value))}
-              className="w-full"
-              title="Select duration"
-              aria-label="Select booking duration"
+              onChange={(value: number | number[]) => setDuration(value as number)}
+              className="max-w-full"
+              color="primary"
             />
             <div className="flex justify-between text-xs text-gray-400">
               <span>15 min</span>
@@ -821,12 +865,11 @@ function BookingSatelliteSelector({ satellites, groundStations, onClose }: Booki
       <Card>
         <CardHeader className="font-semibold">Purpose</CardHeader>
         <CardBody>
-          <textarea
-            className="w-full p-2 rounded-lg bg-gray-800 text-white border border-gray-600 resize-none"
-            rows={3}
+          <Textarea
             placeholder="Brief description of your mission (e.g., Earth observation, data relay, research)"
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
+            minRows={3}
           />
         </CardBody>
       </Card>
