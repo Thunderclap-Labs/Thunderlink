@@ -26,12 +26,16 @@ export interface SatelliteInfo {
 export async function fetchSatelliteTLEData(): Promise<SatelliteData[]> {
   const satellites: SatelliteData[] = [];
   
-  // Reduced categories for better performance - only fetch key satellite networks
+  // Fetch comprehensive satellite networks for maximum coverage
   const categories = [
-    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium&FORMAT=tle', name: 'Iridium', maxSatellites: 10 },
-    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=globalstar&FORMAT=tle', name: 'Globalstar', maxSatellites: 8 },
-    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=intelsat&FORMAT=tle', name: 'Intelsat', maxSatellites: 6 },
-    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=ses&FORMAT=tle', name: 'SES', maxSatellites: 6 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium&FORMAT=tle', name: 'Iridium', maxSatellites: 100 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=globalstar&FORMAT=tle', name: 'Globalstar', maxSatellites: 50 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=intelsat&FORMAT=tle', name: 'Intelsat', maxSatellites: 60 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=ses&FORMAT=tle', name: 'SES', maxSatellites: 50 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=geostationary&FORMAT=tle', name: 'Geostationary', maxSatellites: 100 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=orbcomm&FORMAT=tle', name: 'Orbcomm', maxSatellites: 40 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle', name: 'Starlink', maxSatellites: 100 },
+    { url: 'https://celestrak.org/NORAD/elements/gp.php?GROUP=oneweb&FORMAT=tle', name: 'OneWeb', maxSatellites: 80 },
   ];
 
   try {
