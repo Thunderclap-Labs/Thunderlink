@@ -11,6 +11,47 @@
     margin: 0;
     padding: 0;
   }
+
+  /* Improve touch interactions on mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Ensure buttons and interactive elements have proper touch targets */
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent text selection during interactions */
+  canvas {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Optimize font rendering on mobile */
+  @media (max-width: 768px) {
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* Smoother transitions for mobile interactions */
+    * {
+      -webkit-transition: transform 0.15s ease-out;
+      transition: transform 0.15s ease-out;
+    }
+
+    /* Larger clickable areas on mobile */
+    button:not(.no-enlarge),
+    a:not(.no-enlarge),
+    [role="button"]:not(.no-enlarge) {
+      min-height: 48px;
+      min-width: 48px;
+    }
+  }
 }
 
 /* React DatePicker Dark Theme Customization */

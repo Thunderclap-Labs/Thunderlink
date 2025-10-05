@@ -20,6 +20,7 @@ import { useGroundStationStore, CustomGroundStation } from '@/store/groundStatio
 import { SatelliteBooking } from '@/types';
 import styles from './EarthScene.module.css';
 import DownlinkPredictionCard from './DownlinkPredictionCard';
+import MobileGestureHelper from './MobileGestureHelper';
 
 // Helper function to create circular texture for stars to prevent square appearance
 function createCircleTexture() {
@@ -112,10 +113,22 @@ export default function EarthScene() {
   const [filteredSatelliteName, setFilteredSatelliteName] = useState<string | null>(null);
   const [passPredictions, setPassPredictions] = useState<PassPrediction[]>([]);
   const [showPassPredictions, setShowPassPredictions] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showMobileFAB, setShowMobileFAB] = useState(true);
+  const [touchStartX, setTouchStartX] = useState<number>(0);
+  const [touchStartY, setTouchStartY] = useState<number>(0);
 
   const { setGroundStations } = useBookingStore();
   const { filters, selectedSatelliteFilter, accessibleGroundStations, setSelectedSatelliteFilter, setAccessibleGroundStations, clearSatelliteFilter } = useSettingsStore();
   const { customStations } = useGroundStationStore();
+
+  // Set mobile-optimized defaults after hydration
+  useEffect(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    if (isMobile) {
+      setMaxSatelliteCount(50); // Lower default for mobile
+    }
+  }, []);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -138,12 +151,18 @@ export default function EarthScene() {
     cameraRef.current = camera;
 
     // Renderer setup with performance optimizations
+    // Detect if mobile device
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    
     const renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
-      powerPreference: "high-performance", // Request high-performance GPU
+      antialias: !isMobile, // Disable antialiasing on mobile for better performance
+      powerPreference: isMobile ? "default" : "high-performance",
+      alpha: false, // Disable transparency for better performance
+      stencil: false, // Disable stencil buffer if not needed
     });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio to 2 for better performance
+    // Limit pixel ratio more aggressively on mobile
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -156,7 +175,9 @@ export default function EarthScene() {
     scene.add(directionalLight);
 
     // Create Earth with texture - reduced geometry for better performance
-    const earthGeometry = new THREE.SphereGeometry(2, 48, 48); // Reduced from 64 to 48
+    // Use lower geometry on mobile
+    const earthSegments = isMobile ? 32 : 48;
+    const earthGeometry = new THREE.SphereGeometry(2, earthSegments, earthSegments);
     
     // Load Earth texture
     const textureLoader = new THREE.TextureLoader();
@@ -173,7 +194,8 @@ export default function EarthScene() {
     earthRef.current = earth;
 
     // Add enhanced atmosphere glow with multiple layers - reduced geometry for performance
-    const atmosphereGeometry = new THREE.SphereGeometry(2.08, 32, 32); // Reduced from 64 to 32
+    const atmosphereSegments = isMobile ? 24 : 32;
+    const atmosphereGeometry = new THREE.SphereGeometry(2.08, atmosphereSegments, atmosphereSegments);
     const atmosphereMaterial = new THREE.MeshBasicMaterial({
       color: 0x4499ff,
       transparent: true,
@@ -185,7 +207,7 @@ export default function EarthScene() {
     scene.add(atmosphere);
     
     // Add outer glow layer
-    const outerGlowGeometry = new THREE.SphereGeometry(2.15, 32, 32); // Reduced from 64 to 32
+    const outerGlowGeometry = new THREE.SphereGeometry(2.15, atmosphereSegments, atmosphereSegments);
     const outerGlowMaterial = new THREE.MeshBasicMaterial({
       color: 0x2266ff,
       transparent: true,
@@ -197,12 +219,14 @@ export default function EarthScene() {
     scene.add(outerGlow);
 
     // Create enhanced stars background with better density and visibility
+    // Reduce star count on mobile for better performance
+    const starCount = isMobile ? 3000 : 8000;
     const starsGeometry = new THREE.BufferGeometry();
     const starsVertices = [];
     const starsSizes = [];
     const starsColors = [];
     
-    for (let i = 0; i < 8000; i++) { // Increased to 8000 for better star field density
+    for (let i = 0; i < starCount; i++) {
       const x = (Math.random() - 0.5) * 200;
       const y = (Math.random() - 0.5) * 200;
       const z = (Math.random() - 0.5) * 200;
@@ -722,11 +746,92 @@ export default function EarthScene() {
       cameraRef.current.position.z = Math.max(minZoom, Math.min(maxZoom, cameraRef.current.position.z));
     };
 
+    // Touch event handlers for mobile
+    let touchStartDistance = 0;
+    let lastTouchTime = 0;
+    
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        // Pinch zoom gesture
+        touchStartDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      } else if (e.touches.length === 1) {
+        // Single touch for rotation
+        isMouseDown = true;
+        isDragging = false;
+        const touch = e.touches[0];
+        dragStartPosition = { x: touch.clientX, y: touch.clientY };
+        previousMousePosition = { x: touch.clientX, y: touch.clientY };
+        
+        // Check for double-tap
+        const currentTime = Date.now();
+        if (currentTime - lastTouchTime < 300) {
+          // Double tap detected - handle satellite selection
+          handleClick(e as any);
+        }
+        lastTouchTime = currentTime;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      
+      if (e.touches.length === 2 && cameraRef.current) {
+        // Pinch zoom
+        const currentDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const delta = touchStartDistance - currentDistance;
+        
+        const minZoom = 3;
+        const maxZoom = 20;
+        cameraRef.current.position.z += delta * 0.01;
+        cameraRef.current.position.z = Math.max(minZoom, Math.min(maxZoom, cameraRef.current.position.z));
+        
+        touchStartDistance = currentDistance;
+      } else if (e.touches.length === 1 && isMouseDown) {
+        // Single touch rotation
+        const touch = e.touches[0];
+        const deltaFromStart = Math.abs(touch.clientX - dragStartPosition.x) + Math.abs(touch.clientY - dragStartPosition.y);
+        
+        if (deltaFromStart > 5) {
+          isDragging = true;
+        }
+
+        if (isDragging && earthRef.current) {
+          const deltaX = touch.clientX - previousMousePosition.x;
+          const deltaY = touch.clientY - previousMousePosition.y;
+
+          earthRef.current.rotation.y += deltaX * 0.005;
+          earthRef.current.rotation.x += deltaY * 0.005;
+
+          if (satellitesRef.current) {
+            satellitesRef.current.rotation.y = earthRef.current.rotation.y;
+            satellitesRef.current.rotation.x = earthRef.current.rotation.x;
+          }
+
+          previousMousePosition = { x: touch.clientX, y: touch.clientY };
+        }
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      isMouseDown = false;
+      isDragging = false;
+      touchStartDistance = 0;
+    };
+
     renderer.domElement.addEventListener('mousedown', handleMouseDown);
     renderer.domElement.addEventListener('mousemove', handleMouseMove);
     renderer.domElement.addEventListener('mouseup', handleMouseUp);
     renderer.domElement.addEventListener('click', handleClick);
     renderer.domElement.addEventListener('wheel', handleWheel, { passive: false });
+    renderer.domElement.addEventListener('touchstart', handleTouchStart, { passive: false });
+    renderer.domElement.addEventListener('touchmove', handleTouchMove, { passive: false });
+    renderer.domElement.addEventListener('touchend', handleTouchEnd);
     renderer.domElement.style.cursor = 'grab';
 
     // Cleanup
@@ -737,6 +842,9 @@ export default function EarthScene() {
       renderer.domElement.removeEventListener('mouseup', handleMouseUp);
       renderer.domElement.removeEventListener('click', handleClick);
       renderer.domElement.removeEventListener('wheel', handleWheel);
+      renderer.domElement.removeEventListener('touchstart', handleTouchStart);
+      renderer.domElement.removeEventListener('touchmove', handleTouchMove);
+      renderer.domElement.removeEventListener('touchend', handleTouchEnd);
       
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
@@ -782,6 +890,9 @@ export default function EarthScene() {
   useEffect(() => {
     if (!satellitesRef.current || satellites.length === 0) return;
 
+    // Detect if mobile device
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
     // Clear existing satellites
     satelliteMeshesRef.current.clear();
     while (satellitesRef.current.children.length > 0) {
@@ -819,7 +930,9 @@ export default function EarthScene() {
       // Create satellite mesh - smaller with glow effect for modern look
       // Highlight the filtered satellite with a different color
       const isFiltered = selectedSatelliteFilter === sat.name;
-      const satelliteGeometry = new THREE.SphereGeometry(isFiltered ? 0.06 : 0.02, 16, 16); // Make filtered satellite larger
+      const satelliteSize = isMobile ? (isFiltered ? 0.05 : 0.015) : (isFiltered ? 0.06 : 0.02);
+      const satelliteSegments = isMobile ? 8 : 16; // Reduce geometry complexity on mobile
+      const satelliteGeometry = new THREE.SphereGeometry(satelliteSize, satelliteSegments, satelliteSegments);
       const satelliteMaterial = new THREE.MeshStandardMaterial({
         color: isFiltered ? 0xff00ff : 0x00ffff,
         emissive: isFiltered ? 0xff00ff : 0x00ffff,
@@ -851,9 +964,10 @@ export default function EarthScene() {
       console.log('Created mesh for satellite:', sat.name, 'at position:', position);
 
       // Add orbit trail - make it more visible for filtered satellite
+      // Reduce trail complexity on mobile
       const trailGeometry = new THREE.BufferGeometry();
       const trailPoints = [];
-      const numPoints = isFiltered ? 100 : 50; // More trail points for filtered satellite
+      const numPoints = isMobile ? (isFiltered ? 50 : 25) : (isFiltered ? 100 : 50);
 
       for (let i = 0; i < numPoints; i++) {
         const date = new Date(Date.now() - i * 60000); // 1 minute intervals
@@ -917,9 +1031,49 @@ export default function EarthScene() {
     }
   }, [selectedSatelliteFilter]);
 
+  // Handle swipe gestures for mobile menu
+  useEffect(() => {
+    const handleTouchStartMenu = (e: TouchEvent) => {
+      if (window.innerWidth >= 768) return; // Only on mobile
+      setTouchStartX(e.touches[0].clientX);
+      setTouchStartY(e.touches[0].clientY);
+    };
+
+    const handleTouchEndMenu = (e: TouchEvent) => {
+      if (window.innerWidth >= 768) return; // Only on mobile
+      
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      const deltaX = touchEndX - touchStartX;
+      const deltaY = touchEndY - touchStartY;
+      
+      // Check if horizontal swipe is dominant (not vertical scroll)
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+        if (deltaX > 0 && touchStartX < 50) {
+          // Swipe right from left edge - open menu
+          setIsMobileMenuOpen(true);
+        } else if (deltaX < 0 && isMobileMenuOpen) {
+          // Swipe left - close menu
+          setIsMobileMenuOpen(false);
+        }
+      }
+    };
+
+    document.addEventListener('touchstart', handleTouchStartMenu);
+    document.addEventListener('touchend', handleTouchEndMenu);
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStartMenu);
+      document.removeEventListener('touchend', handleTouchEndMenu);
+    };
+  }, [touchStartX, touchStartY, isMobileMenuOpen]);
+
   return (
     <div className="relative w-full h-screen">
       <div ref={containerRef} className="w-full h-full" />
+      
+      {/* Mobile Gesture Helper - shows on first visit */}
+      <MobileGestureHelper />
       
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -940,11 +1094,34 @@ export default function EarthScene() {
         </div>
       )}
 
-      <div className="absolute top-4 left-4 bg-black/70 text-white p-4 rounded-lg backdrop-blur-sm max-w-xs">
-        <h3 className="text-lg font-bold mb-3">Thunderlink Network</h3>
+      {/* Mobile-optimized control panel with collapsible functionality */}
+      <div className={`absolute top-4 left-4 bg-black/70 text-white rounded-lg backdrop-blur-sm transition-all duration-300 ease-in-out
+        ${isMobileMenuOpen ? 'p-3 md:p-4 max-w-xs w-[calc(100vw-2rem)] md:w-auto' : 'p-2 w-12 h-12 md:p-4 md:max-w-xs md:w-auto'}
+        md:p-4 md:max-w-xs md:w-auto`}>
+        
+        {/* Mobile hamburger button - only visible on mobile */}
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="md:hidden absolute top-2 right-2 p-2 hover:bg-white/10 rounded transition-colors z-10"
+          aria-label="Toggle menu"
+        >
+          {isMobileMenuOpen ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          )}
+        </button>
+
+        {/* Content - hidden when collapsed on mobile, always visible on desktop */}
+        <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} md:block`}>
+        <h3 className="text-base md:text-lg font-bold mb-2 md:mb-3 pr-8 md:pr-0">Thunderlink Network</h3>
         
         {/* Satellite Search Feature */}
-        <div className="mb-4 space-y-2">
+        <div className="mb-3 md:mb-4 space-y-2">
           <div className="relative">
             <Input
               size="sm"
@@ -1055,7 +1232,7 @@ export default function EarthScene() {
           )}
         </div>
         
-        <div className="space-y-2 text-sm">
+        <div className="space-y-2 text-xs md:text-sm">
           <div className="flex justify-between">
             <span>Satellites:</span>
             <span className="font-bold text-blue-400">{Math.min(satellites.length, maxSatelliteCount)}</span>
@@ -1069,7 +1246,7 @@ export default function EarthScene() {
             <span className="font-bold text-cyan-400">{activeConnections}</span>
           </div>
         </div>
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 md:mt-4 space-y-2 md:space-y-3">
           {/* Satellite Count Slider */}
           <div className="space-y-1">
             <label className="text-xs text-gray-300">Satellite Count: {maxSatelliteCount}</label>
@@ -1086,18 +1263,20 @@ export default function EarthScene() {
           </div>
           <Button 
             color="primary" 
+            size="sm"
             fullWidth 
             onPress={() => setIsBookingModalOpen(true)}
-            className="font-semibold"
+            className="font-semibold text-xs md:text-sm"
           >
             Book Satellite Time
           </Button>
           <Button 
             color="success" 
             variant="flat"
+            size="sm"
             fullWidth 
             onPress={() => setIsGroundStationModalOpen(true)}
-            className="font-semibold"
+            className="font-semibold text-xs md:text-sm"
           >
             Manage Ground Stations
           </Button>
@@ -1117,6 +1296,7 @@ export default function EarthScene() {
                 }
               }}
               fullWidth
+              className="text-xs"
             >
               {showSatellites ? 'Hide' : 'Show'} Satellites
             </Button>
@@ -1137,16 +1317,73 @@ export default function EarthScene() {
                 }
               }}
               fullWidth
+              className="text-xs"
             >
               {showGroundStations ? 'Hide' : 'Show'} Stations
             </Button>
           </div>
         </div>
-        <p className="text-xs text-gray-400 mt-3">
-          Drag to rotate • Click satellite for info • Click station to book
+        <p className="text-[10px] md:text-xs text-gray-400 mt-2 md:mt-3">
+          Drag/Swipe to rotate • Tap satellite for info • Tap station to book
         </p>
+        </div>
       </div>
 
+      {/* Mobile Floating Action Button (FAB) Menu */}
+      <div className="md:hidden fixed bottom-6 right-6 z-40">
+        {/* Quick action buttons - shown when FAB is expanded */}
+        <div className={`absolute bottom-16 right-0 flex flex-col gap-3 transition-all duration-300 ${showMobileFAB ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+          <button
+            onClick={() => {
+              setIsBookingModalOpen(true);
+              setShowMobileFAB(false);
+            }}
+            className="bg-primary text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform flex items-center gap-2 pr-6"
+            aria-label="Book Satellite"
+          >
+            <span className="text-xl">🛰️</span>
+            <span className="text-sm font-semibold whitespace-nowrap">Book Time</span>
+          </button>
+          <button
+            onClick={() => {
+              setIsGroundStationModalOpen(true);
+              setShowMobileFAB(false);
+            }}
+            className="bg-success text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform flex items-center gap-2 pr-6"
+            aria-label="Ground Stations"
+          >
+            <span className="text-xl">📡</span>
+            <span className="text-sm font-semibold whitespace-nowrap">Stations</span>
+          </button>
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="bg-secondary text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform flex items-center gap-2 pr-6"
+            aria-label="Search"
+          >
+            <span className="text-xl">🔍</span>
+            <span className="text-sm font-semibold whitespace-nowrap">Search</span>
+          </button>
+        </div>
+
+        {/* Main FAB toggle button */}
+        <button
+          onClick={() => setShowMobileFAB(!showMobileFAB)}
+          className="bg-gradient-to-r from-primary to-secondary text-white p-5 rounded-full shadow-2xl hover:scale-110 transition-all flex items-center justify-center"
+          aria-label="Quick actions menu"
+        >
+          {showMobileFAB ? (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {/* Modals Section */}
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => {
@@ -1159,13 +1396,61 @@ export default function EarthScene() {
         size="5xl"
         backdrop="blur"
         scrollBehavior="inside"
+        className="mx-2 md:mx-0"
+        classNames={{
+          base: "max-h-[90vh]",
+          body: "p-3 md:p-6",
+          wrapper: "items-end md:items-center" // Bottom sheet on mobile
+        }}
+        motionProps={{
+          variants: {
+            enter: {
+              y: 0,
+              opacity: 1,
+              transition: {
+                duration: 0.3,
+                ease: "easeOut"
+              }
+            },
+            exit: {
+              y: "100%",
+              opacity: 0,
+              transition: {
+                duration: 0.2,
+                ease: "easeIn"
+              }
+            }
+          }
+        }}
       >
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="flex flex-col gap-1">
-                <h2 className="text-xl font-bold">{selectedSatellite?.name}</h2>
-                <Chip color="primary" size="sm">{selectedSatellite?.category}</Chip>
+                <div className="flex items-center justify-between w-full">
+                  <div>
+                    <h2 className="text-xl font-bold">{selectedSatellite?.name}</h2>
+                    <Chip color="primary" size="sm">{selectedSatellite?.category}</Chip>
+                  </div>
+                  {/* Mobile close indicator */}
+                  <button
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      if (autoRefreshInterval) {
+                        clearInterval(autoRefreshInterval);
+                        setAutoRefreshInterval(null);
+                      }
+                    }}
+                    className="md:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                    aria-label="Close"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Mobile drag indicator */}
+                <div className="md:hidden w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-2" />
               </ModalHeader>
               <ModalBody>
                 {selectedSatellite && (
@@ -1218,15 +1503,15 @@ export default function EarthScene() {
 
                     {/* Real-time Position */}
                     <Card>
-                      <CardHeader className="font-semibold flex items-center gap-2">
+                      <CardHeader className="font-semibold flex items-center gap-2 text-sm md:text-base">
                         <span className="text-lg">📍</span>
                         Current Position
                       </CardHeader>
                       <CardBody>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                           <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                             <span className="text-gray-500 block text-xs mb-1">Latitude</span>
-                            <span className="font-mono font-bold text-lg">
+                            <span className="font-mono font-bold text-base md:text-lg">
                               {selectedSatellite.position.lat.toFixed(4)}°
                             </span>
                             <span className="text-xs text-gray-500 ml-1">
@@ -1235,16 +1520,16 @@ export default function EarthScene() {
                           </div>
                           <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                             <span className="text-gray-500 block text-xs mb-1">Longitude</span>
-                            <span className="font-mono font-bold text-lg">
+                            <span className="font-mono font-bold text-base md:text-lg">
                               {selectedSatellite.position.lon.toFixed(4)}°
                             </span>
                             <span className="text-xs text-gray-500 ml-1">
                               {selectedSatellite.position.lon >= 0 ? 'E' : 'W'}
                             </span>
                           </div>
-                          <div className="col-span-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                          <div className="col-span-1 sm:col-span-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
                             <span className="text-gray-500 block text-xs mb-1">Altitude Above Earth</span>
-                            <span className="font-mono font-bold text-xl text-blue-600 dark:text-blue-400">
+                            <span className="font-mono font-bold text-lg md:text-xl text-blue-600 dark:text-blue-400">
                               {selectedSatellite.position.alt.toFixed(2)} km
                             </span>
                             <span className="text-xs text-gray-500 ml-2">
@@ -1257,12 +1542,12 @@ export default function EarthScene() {
 
                     {/* Orbital Dynamics */}
                     <Card>
-                      <CardHeader className="font-semibold flex items-center gap-2">
+                      <CardHeader className="font-semibold flex items-center gap-2 text-sm md:text-base">
                         <span className="text-lg">🛰️</span>
                         Orbital Data
                       </CardHeader>
                       <CardBody>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                           <div className="p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
                             <span className="text-gray-500 block text-xs mb-1">Velocity</span>
                             <span className="font-mono font-bold text-lg text-purple-600 dark:text-purple-400">
@@ -1275,7 +1560,7 @@ export default function EarthScene() {
                           {selectedSatellite.period && (
                             <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg">
                               <span className="text-gray-500 block text-xs mb-1">Orbital Period</span>
-                              <span className="font-mono font-bold text-lg text-green-600 dark:text-green-400">
+                              <span className="font-mono font-bold text-base md:text-lg text-green-600 dark:text-green-400">
                                 {selectedSatellite.period.toFixed(0)} min
                               </span>
                               <span className="text-xs text-gray-500 block mt-1">
@@ -1284,9 +1569,9 @@ export default function EarthScene() {
                             </div>
                           )}
                           {selectedSatellite.period && (
-                            <div className="col-span-2 p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
+                            <div className="col-span-1 sm:col-span-2 p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
                               <span className="text-gray-500 block text-xs mb-1">Orbits Per Day</span>
-                              <span className="font-mono font-bold text-lg text-orange-600 dark:text-orange-400">
+                              <span className="font-mono font-bold text-base md:text-lg text-orange-600 dark:text-orange-400">
                                 {(1440 / selectedSatellite.period).toFixed(2)}
                               </span>
                               <span className="text-xs text-gray-500 ml-2">
@@ -1357,12 +1642,14 @@ export default function EarthScene() {
                 )}
               </ModalBody>
               <ModalFooter>
-                <Button color="default" variant="light" onPress={onClose}>
+                <Button color="default" variant="light" onPress={onClose} size="lg" className="min-h-12">
                   Close
                 </Button>
                 <Button 
                   color="secondary" 
                   variant="flat"
+                  size="lg"
+                  className="min-h-12"
                   onPress={() => {
                     onClose();
                     setIsTrackingModalOpen(true);
@@ -1372,6 +1659,8 @@ export default function EarthScene() {
                 </Button>
                 <Button 
                   color="primary" 
+                  size="lg"
+                  className="min-h-12"
                   onPress={() => {
                     onClose();
                     setIsBookingModalOpen(true);
@@ -1396,11 +1685,19 @@ export default function EarthScene() {
         size="2xl"
         backdrop="blur"
         scrollBehavior="inside"
+        className="mx-2 md:mx-0"
+        classNames={{
+          base: "max-h-[90vh]",
+          body: "p-3 md:p-6",
+          wrapper: "items-end md:items-center" // Bottom sheet on mobile
+        }}
       >
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="flex flex-col gap-1">
+                {/* Mobile drag indicator */}
+                <div className="md:hidden w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-2" />
                 <h2 className="text-2xl font-bold">Book Satellite Time</h2>
                 {selectedGroundStation ? (
                   <div className="flex items-center gap-2">
@@ -1436,11 +1733,19 @@ export default function EarthScene() {
         size="3xl"
         backdrop="blur"
         scrollBehavior="inside"
+        className="mx-2 md:mx-0"
+        classNames={{
+          base: "max-h-[90vh]",
+          body: "p-3 md:p-6",
+          wrapper: "items-end md:items-center" // Bottom sheet on mobile
+        }}
       >
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="flex flex-col gap-1">
+                {/* Mobile drag indicator */}
+                <div className="md:hidden w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-2" />
                 <h2 className="text-2xl font-bold">Ground Station Management</h2>
                 <p className="text-sm text-gray-500">View all stations and register your own</p>
               </ModalHeader>
@@ -1461,6 +1766,12 @@ export default function EarthScene() {
         onClose={() => setIsTrackingModalOpen(false)}
         size="2xl"
         backdrop="blur"
+        className="mx-2 md:mx-0"
+        classNames={{
+          base: "max-h-[90vh]",
+          body: "p-3 md:p-6",
+          wrapper: "items-end md:items-center" // Bottom sheet on mobile
+        }}
       >
         <ModalContent>
           {(onClose) => (
@@ -1605,6 +1916,12 @@ export default function EarthScene() {
         size="3xl"
         backdrop="blur"
         scrollBehavior="inside"
+        className="mx-2 md:mx-0"
+        classNames={{
+          base: "max-h-[90vh]",
+          body: "p-3 md:p-6",
+          wrapper: "items-end md:items-center" // Bottom sheet on mobile
+        }}
       >
         <ModalContent>
           {(onClose) => (
