@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
+import { DatePicker } from '@heroui/date-picker';
+import { parseAbsoluteToLocal } from '@internationalized/date';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@heroui/modal';
 import { Button } from '@heroui/button';
 import { Card, CardBody, CardHeader } from '@heroui/card';
@@ -19,6 +19,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useGroundStationStore, CustomGroundStation } from '@/store/groundStationStore';
 import { SatelliteBooking } from '@/types';
 import styles from './EarthScene.module.css';
+import DownlinkPredictionCard from './DownlinkPredictionCard';
 
 // Helper function to create circular texture for stars to prevent square appearance
 function createCircleTexture() {
@@ -382,9 +383,9 @@ export default function EarthScene() {
         starsRef.current.rotation.y += 0.0001;
       }
       
-      // Update satellite positions and connections
+      // Update satellite positions and connections more frequently for better tracking
       const now = Date.now();
-      if (now - lastUpdateTimeRef.current > 2000) { // Update every 2 seconds for better performance
+      if (now - lastUpdateTimeRef.current > 1000) { // Update every 1 second for smoother tracking
         lastUpdateTimeRef.current = now;
         updateSatellitePositions();
       } else {
@@ -434,6 +435,11 @@ export default function EarthScene() {
       const currentDate = new Date();
       let connections = 0;
       
+      // Debug logging for tracking
+      if (selectedSatelliteFilterRef.current) {
+        console.log(`Updating positions for filtered satellite: ${selectedSatelliteFilterRef.current}`);
+      }
+      
       // Hide all connection lines first
       connectionLinePool.forEach(line => {
         line.visible = false;
@@ -452,6 +458,11 @@ export default function EarthScene() {
         const satelliteMesh = satelliteMeshesRef.current.get(sat.name);
         if (satelliteMesh) {
           satelliteMesh.position.set(position.x, position.y, position.z);
+          
+          // Debug logging for filtered satellite
+          if (sat.name === selectedSatelliteFilterRef.current) {
+            console.log(`Tracked satellite ${sat.name} position:`, position);
+          }
           
           // Only draw connection lines if we haven't hit the limit
           if (connections < MAX_CONNECTION_LINES && showConnections) {
@@ -500,6 +511,11 @@ export default function EarthScene() {
       });
       
       setActiveConnections(connections);
+      
+      // Debug logging for tracking
+      if (selectedSatelliteFilterRef.current) {
+        console.log(`Found ${connections} connections for tracked satellite`);
+      }
     };
     
     animate();
@@ -777,28 +793,37 @@ export default function EarthScene() {
     if (selectedSatelliteFilter) {
       // Show only the filtered satellite
       satellitesToDisplay = satellites.filter(s => s.name === selectedSatelliteFilter);
+      console.log('Filtering to satellite:', selectedSatelliteFilter);
+      console.log('Found satellites:', satellitesToDisplay.length);
     } else {
       // Show all satellites up to maxSatelliteCount
       satellitesToDisplay = satellites.slice(0, maxSatelliteCount);
     }
     
-    // Update satelliteDataRef to match displayed satellites
+    // Update satelliteDataRef to match displayed satellites - THIS IS CRITICAL for tracking
     satelliteDataRef.current = satellitesToDisplay;
+    console.log('Displaying', satellitesToDisplay.length, 'satellites');
     
     satellitesToDisplay.forEach((sat) => {
-      if (!sat.satrec) return;
+      if (!sat.satrec) {
+        console.log('No satrec for satellite:', sat.name);
+        return;
+      }
 
       const position = calculateSatellitePosition(sat.satrec);
-      if (!position) return;
+      if (!position) {
+        console.log('Could not calculate position for:', sat.name);
+        return;
+      }
 
       // Create satellite mesh - smaller with glow effect for modern look
       // Highlight the filtered satellite with a different color
       const isFiltered = selectedSatelliteFilter === sat.name;
-      const satelliteGeometry = new THREE.SphereGeometry(isFiltered ? 0.04 : 0.02, 16, 16);
+      const satelliteGeometry = new THREE.SphereGeometry(isFiltered ? 0.06 : 0.02, 16, 16); // Make filtered satellite larger
       const satelliteMaterial = new THREE.MeshStandardMaterial({
         color: isFiltered ? 0xff00ff : 0x00ffff,
         emissive: isFiltered ? 0xff00ff : 0x00ffff,
-        emissiveIntensity: isFiltered ? 1.2 : 0.8,
+        emissiveIntensity: isFiltered ? 1.5 : 0.8, // Brighter for filtered satellite
         metalness: 0.5,
         roughness: 0.2,
       });
@@ -811,17 +836,19 @@ export default function EarthScene() {
         map: glowTexture,
         color: isFiltered ? 0xff00ff : 0x00ffff,
         transparent: true,
-        opacity: isFiltered ? 0.8 : 0.6,
+        opacity: isFiltered ? 1.0 : 0.6, // More visible for filtered satellite
         blending: THREE.AdditiveBlending,
       });
       const sprite = new THREE.Sprite(spriteMaterial);
-      sprite.scale.set(isFiltered ? 0.25 : 0.15, isFiltered ? 0.25 : 0.15, 1);
+      sprite.scale.set(isFiltered ? 0.4 : 0.15, isFiltered ? 0.4 : 0.15, 1); // Larger glow for filtered
       satelliteMesh.add(sprite);
       satelliteMesh.position.set(position.x, position.y, position.z);
       satelliteMesh.userData.name = sat.name;
       
       // Store reference for real-time updates
       satelliteMeshesRef.current.set(sat.name, satelliteMesh);
+      
+      console.log('Created mesh for satellite:', sat.name, 'at position:', position);
 
       // Add orbit trail - make it more visible for filtered satellite
       const trailGeometry = new THREE.BufferGeometry();
@@ -839,7 +866,7 @@ export default function EarthScene() {
       trailGeometry.setAttribute('position', new THREE.Float32BufferAttribute(trailPoints, 3));
       const trailMaterial = new THREE.LineBasicMaterial({
         color: isFiltered ? 0xff00ff : 0x00ffff,
-        opacity: isFiltered ? 0.5 : 0.2,
+        opacity: isFiltered ? 0.7 : 0.2, // More visible trail for filtered satellite
         transparent: true,
         linewidth: 1,
       });
@@ -848,6 +875,9 @@ export default function EarthScene() {
       satellitesRef.current?.add(satelliteMesh);
       satellitesRef.current?.add(trail);
     });
+    
+    // Position updates are handled by the animation loop
+    // No need to call updateSatellitePositions here as it's defined in the Three.js initialization useEffect
   }, [satellites, maxSatelliteCount, selectedSatelliteFilter]);
 
   // Update ground station visibility based on accessible ground stations
@@ -1126,8 +1156,9 @@ export default function EarthScene() {
             setAutoRefreshInterval(null);
           }
         }}
-        size="lg"
+        size="5xl"
         backdrop="blur"
+        scrollBehavior="inside"
       >
         <ModalContent>
           {(onClose) => (
@@ -1266,6 +1297,56 @@ export default function EarthScene() {
                         </div>
                       </CardBody>
                     </Card>
+
+                    {/* Downlink Data Rate Prediction */}
+                    {(() => {
+                      // Calculate elevation angle from nearest ground station
+                      let nearestElevation = 45; // Default value
+                      let nearestGsLat = 0;
+                      let nearestGsLon = 0;
+                      
+                      // Find the nearest ground station
+                      if (selectedSatellite) {
+                        const satPos = new THREE.Vector3(
+                          selectedSatellite.position.lat,
+                          selectedSatellite.position.lon,
+                          selectedSatellite.position.alt
+                        );
+                        
+                        let minDistance = Infinity;
+                        GROUND_STATIONS.forEach(gs => {
+                          if (gs.status === 'online') {
+                            const distance = Math.sqrt(
+                              Math.pow(gs.location.lat - selectedSatellite.position.lat, 2) +
+                              Math.pow(gs.location.lon - selectedSatellite.position.lon, 2)
+                            );
+                            
+                            if (distance < minDistance) {
+                              minDistance = distance;
+                              nearestGsLat = gs.location.lat;
+                              nearestGsLon = gs.location.lon;
+                              
+                              // Simplified elevation angle calculation
+                              // In reality, this would use more complex spherical geometry
+                              const altitudeKm = selectedSatellite.position.alt;
+                              const rangeKm = distance * 111; // Rough conversion to km
+                              nearestElevation = Math.atan2(altitudeKm, rangeKm) * (180 / Math.PI);
+                              nearestElevation = Math.max(10, Math.min(90, nearestElevation)); // Clamp to reasonable range
+                            }
+                          }
+                        });
+                      }
+                      
+                      return (
+                        <div className="border-t-2 border-primary/30 pt-4">
+                          <DownlinkPredictionCard
+                            elevationAngle={nearestElevation}
+                            groundStationLat={nearestGsLat}
+                            groundStationLon={nearestGsLon}
+                          />
+                        </div>
+                      );
+                    })()}
 
                     {/* Live Status Indicator */}
                     <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
@@ -1479,8 +1560,33 @@ export default function EarthScene() {
                 <Button 
                   color="secondary" 
                   onPress={() => {
-                    // Here you would implement the actual tracking functionality
-                    alert(`Tracking ${selectedSatellite?.name} for ${trackingDuration} hours. This feature will continuously monitor and log satellite positions.`);
+                    if (selectedSatellite) {
+                      // Find the satellite in the satellites array
+                      const satelliteToTrack = satellites.find(s => s.name === selectedSatellite.name);
+                      
+                      if (satelliteToTrack && satelliteToTrack.satrec) {
+                        // Enable tracking by filtering to this satellite
+                        setFilteredSatelliteName(selectedSatellite.name);
+                        setSelectedSatelliteFilter(selectedSatellite.name);
+                        setSatelliteSearchQuery(selectedSatellite.name);
+                        
+                        // Calculate accessible ground stations
+                        const accessible = getAccessibleGroundStations(satelliteToTrack.satrec, GROUND_STATIONS, trackingDuration);
+                        setAccessibleGroundStations(accessible);
+                        
+                        // Get detailed pass predictions
+                        const predictions = predictSatellitePasses(satelliteToTrack.satrec, GROUND_STATIONS, new Date(), trackingDuration);
+                        setPassPredictions(predictions);
+                        
+                        // Enable connections to show which ground stations can see it
+                        setShowConnections(true);
+                        if (connectionLinesRef.current) {
+                          connectionLinesRef.current.visible = true;
+                        }
+                        
+                        console.log(`Now tracking ${selectedSatellite.name} - accessible from ${accessible.length} ground stations`);
+                      }
+                    }
                     onClose();
                   }}
                 >
@@ -1657,7 +1763,7 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
   const { addBooking, placeBid, getAuctionBids } = useBookingStore();
   const [selectedSatellite, setSelectedSatellite] = useState<string>('');
   const [duration, setDuration] = useState<number>(30);
-  const [startTime, setStartTime] = useState<Date | null>(null);
+  const [startDateTime, setStartDateTime] = useState<any>(null);
   const [purpose, setPurpose] = useState<string>('');
   const [bidAmount, setBidAmount] = useState<number>(0);
   const [auctionDuration, setAuctionDuration] = useState<number>(24); // hours
@@ -1686,7 +1792,7 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
   const minimumBid = Math.floor(price * 0.8); // Auction starts at 80% of instant price
   
   const handleBooking = () => {
-    if (!selectedSatellite || !startTime || !purpose) {
+    if (!selectedSatellite || !startDateTime || !purpose) {
       alert('Please fill in all fields');
       return;
     }
@@ -1694,7 +1800,8 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
     const satellite = satellites.find(s => s.name === selectedSatellite);
     if (!satellite) return;
     
-    const start = startTime;
+    // Convert internationalized date to JS Date
+    const start = new Date(startDateTime.year, startDateTime.month - 1, startDateTime.day, startDateTime.hour || 0, startDateTime.minute || 0);
     const end = new Date(start.getTime() + duration * 60000);
     
     // Find available ground stations for this satellite
@@ -1812,19 +1919,16 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
         <CardHeader className="font-semibold">Schedule</CardHeader>
         <CardBody className="space-y-4">
           <div className="space-y-2">
-            <label className="block text-sm font-medium">Start Time</label>
             <DatePicker
-              selected={startTime}
-              onChange={(date: Date | null) => setStartTime(date)}
-              showTimeSelect
-              timeFormat="HH:mm"
-              timeIntervals={15}
-              dateFormat="MMMM d, yyyy h:mm aa"
-              minDate={new Date()}
-              placeholderText="Select start date and time"
-              className="w-full px-3 py-2 bg-default-100 border border-default-200 rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              wrapperClassName="w-full"
-              popperClassName="!z-[9999]"
+              label="Start Date & Time"
+              variant="bordered"
+              hideTimeZone
+              showMonthAndYearPickers
+              value={startDateTime}
+              onChange={setStartDateTime}
+              minValue={parseAbsoluteToLocal(new Date().toISOString())}
+              description="Select when you want to start using the satellite"
+              granularity="minute"
             />
           </div>
           <div className="space-y-2">
@@ -1858,6 +1962,44 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
           />
         </CardBody>
       </Card>
+      
+      {/* Downlink Performance Prediction */}
+      {selectedSatellite && selectedGroundStation && (
+        <Card className="border-2 border-primary">
+          <CardHeader className="font-semibold flex items-center gap-2">
+            <span className="text-lg">📊</span>
+            Expected Performance
+          </CardHeader>
+          <CardBody>
+            {(() => {
+              // Calculate elevation angle for selected ground station
+              const satellite = satellites.find(s => s.name === selectedSatellite);
+              if (!satellite || !satellite.satrec) return null;
+              
+              const satInfo = getSatelliteInfo(satellite);
+              if (!satInfo) return null;
+              
+              const distance = Math.sqrt(
+                Math.pow(selectedGroundStation.location.lat - satInfo.position.lat, 2) +
+                Math.pow(selectedGroundStation.location.lon - satInfo.position.lon, 2)
+              );
+              
+              const altitudeKm = satInfo.position.alt;
+              const rangeKm = distance * 111;
+              const elevationAngle = Math.atan2(altitudeKm, rangeKm) * (180 / Math.PI);
+              const clampedElevation = Math.max(10, Math.min(90, elevationAngle));
+              
+              return (
+                <DownlinkPredictionCard
+                  elevationAngle={clampedElevation}
+                  groundStationLat={selectedGroundStation.location.lat}
+                  groundStationLon={selectedGroundStation.location.lon}
+                />
+              );
+            })()}
+          </CardBody>
+        </Card>
+      )}
       
       {/* Booking Type Selection */}
       <Card className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/30">
@@ -2001,7 +2143,7 @@ function BookingSatelliteSelector({ satellites, groundStations, selectedGroundSt
               fullWidth
               className="mt-4"
               onPress={handleBooking}
-              isDisabled={!selectedSatellite || !startTime || !purpose}
+              isDisabled={!selectedSatellite || !startDateTime || !purpose}
             >
               🔨 Create Auction
             </Button>
